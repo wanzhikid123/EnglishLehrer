@@ -1,0 +1,202 @@
+import { lessonApi } from "./api.js";
+
+export async function microphone() {
+  if (!navigator.mediaDevices?.getUserMedia)
+    throw new Error("Bitte öffne die Seite in Chrome über die lokale Adresse.");
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    });
+  } catch (e) {
+    const messages = {
+      NotAllowedError:
+        "Bitte erlaube das Mikrofon in Chrome (Symbol links neben der Adresse) und versuche es erneut.",
+      NotFoundError: "Kein Mikrofon gefunden. Bitte schließe ein Mikrofon an.",
+      NotReadableError:
+        "Das Mikrofon ist gerade nicht verfügbar. Schließe andere Programme, die es verwenden.",
+    };
+    throw new Error(
+      messages[e.name] ||
+        "Das Mikrofon konnte nicht gestartet werden. Bitte überprüfe es und versuche es erneut.",
+    );
+  }
+}
+export class LiveConnection {
+  constructor(id, stream, callbacks) {
+    this.id = id;
+    this.stream = stream;
+    this.callbacks = callbacks;
+    this.closed = false;
+    this.lastActivity = Date.now();
+    this.lastTeacherActivity = 0;
+    this.audio = new Audio();
+    this.audio.autoplay = true;
+    this.audio.playsInline = true;
+    this.sessionStarted = false;
+  }
+  async connect() {
+    const pc = new RTCPeerConnection();
+    this.pc = pc;
+    for (const track of this.stream.getTracks()) {
+      pc.addTrack(track, this.stream);
+      track.onended = () =>
+        this.fail("Das Mikrofon wurde getrennt. Bitte verbinde es erneut.");
+    }
+    this.audioContext = new AudioContext();
+    await this.audioContext.resume();
+    this.analyzers = [];
+    this.watchAudio(this.stream);
+    pc.ontrack = (e) => {
+      const remote = e.streams[0] || new MediaStream([e.track]);
+      this.audio.srcObject = remote;
+      this.watchAudio(remote);
+      this.audio.play().catch(() => this.callbacks.onAudioBlocked?.());
+    };
+    pc.onconnectionstatechange = () => {
+      if (this.closed) return;
+      if (pc.connectionState === "failed")
+        this.fail(
+          "Die Sprachverbindung wurde unterbrochen. Deine Ergebnisse sind gespeichert.",
+        );
+      if (pc.connectionState === "disconnected")
+        this.disconnectTimer = setTimeout(() => {
+          if (pc.connectionState === "disconnected")
+            this.fail(
+              "Die Verbindung ist abgebrochen. Bitte verbinde dich erneut.",
+            );
+        }, 4000);
+      else clearTimeout(this.disconnectTimer);
+    };
+    this.channel = pc.createDataChannel("oai-events");
+    const started = new Promise((resolve, reject) => {
+      this.rejectStartup = reject;
+      this.startTimer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              "Die Sprachverbindung hat zu lange gebraucht. Bitte erneut versuchen.",
+            ),
+          ),
+        30000,
+      );
+      this.channel.onmessage = (e) => {
+        let event;
+        try {
+          event = JSON.parse(e.data);
+        } catch {
+          return;
+        }
+        if (event.type === "session.started") {
+          this.sessionStarted = true;
+          clearTimeout(this.startTimer);
+          resolve();
+        }
+        if (event.type === "session.closed" && !this.closed)
+          this.fail(
+            "Die Sprachstunde wurde getrennt. Du kannst sie erneut verbinden.",
+          );
+        if (
+          event.type === "session.input_transcript.delta" ||
+          event.type === "session.output_transcript.delta"
+        ) {
+          if (event.type === "session.output_transcript.delta")
+            this.lastTeacherActivity = Date.now();
+          this.lastActivity = Date.now();
+          this.callbacks.onTranscript(event);
+        }
+      };
+      this.channel.onclose = () => {
+        if (!this.closed) this.fail("Die Sprachverbindung wurde geschlossen.");
+      };
+    });
+    // The rejection handler is attached before network setup, avoiding an unhandled startup timeout.
+    started.catch(() => {});
+    await pc.setLocalDescription(await pc.createOffer());
+    await new Promise((resolve, reject) => {
+      if (pc.iceGatheringState === "complete") return resolve();
+      const timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              "Die Audioverbindung konnte nicht vorbereitet werden. Bitte prüfe dein Netzwerk.",
+            ),
+          ),
+        10000,
+      );
+      pc.addEventListener("icegatheringstatechange", () => {
+        if (pc.iceGatheringState === "complete") {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+    });
+    if (this.closed) throw new Error("Verbindung beendet.");
+    const result = await lessonApi(this.id, "/connect", {
+      sdp: pc.localDescription.sdp,
+    });
+    if (this.closed) throw new Error("Verbindung beendet.");
+    await pc.setRemoteDescription({ type: "answer", sdp: result.sdp });
+    await started;
+    await lessonApi(this.id, "/ready", {});
+    this.callbacks.onConnected();
+    this.meterTimer = setInterval(() => this.sampleAudio(), 150);
+  }
+  sampleAudio() {
+    let level = 0;
+    for (const analyser of this.analyzers) {
+      const samples = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(samples);
+      const rms =
+        Math.sqrt(
+          samples.reduce((sum, v) => sum + (v - 128) ** 2, 0) / samples.length,
+        ) / 128;
+      level = Math.max(level, rms);
+    }
+    if (level > 0.025) this.lastActivity = Date.now();
+    this.callbacks.onLevel?.(Math.min(1, level * 5));
+  }
+  watchAudio(stream) {
+    try {
+      const source = this.audioContext.createMediaStreamSource(stream);
+      const analyser = this.audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      this.analyzers.push(analyser);
+    } catch {}
+  }
+  mute(muted) {
+    for (const track of this.stream.getAudioTracks()) track.enabled = !muted;
+  }
+  async play() {
+    await this.audio.play();
+  }
+  fail(message) {
+    if (this.closed) return;
+    this.close();
+    this.callbacks.onDisconnected(message);
+  }
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    clearTimeout(this.startTimer);
+    clearTimeout(this.disconnectTimer);
+    clearInterval(this.meterTimer);
+    this.rejectStartup?.(new Error("Verbindung beendet."));
+    if (this.channel?.readyState === "open" && this.sessionStarted)
+      this.channel.send(JSON.stringify({ type: "session.close" }));
+    this.channel?.close();
+    this.pc?.close();
+    this.stream.getTracks().forEach((t) => {
+      t.onended = null;
+      t.stop();
+    });
+    this.audio.pause();
+    this.audio.srcObject = null;
+    this.audioContext?.close().catch(() => {});
+  }
+}
