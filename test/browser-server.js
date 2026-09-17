@@ -1,6 +1,7 @@
 import { Store } from "../server/store.js";
 import { createApp } from "../server/app.js";
 import { Preparation } from "../server/preparation.js";
+import { practiceBoard } from "../server/practice.js";
 const store = new Store(":memory:");
 const config = {
   port: 3213,
@@ -20,6 +21,12 @@ const classroom = {
     return { sdp: "fixture-answer" };
   },
   async ready() {},
+  async setSpeechTempo(id, tempo) {
+    const lesson = store.lesson(id);
+    lesson.state.speechTempo = tempo;
+    store.saveState(id, lesson.state);
+    return { ok: true, tempo };
+  },
   heartbeat(id) {
     return store.heartbeat(id);
   },
@@ -200,5 +207,33 @@ const app = createApp({ store, classroom, config, preparation, ai });
 app.post("/fixture/disconnect", async (req, res) => {
   await classroom.end(l.id, "interrupted");
   res.json({ ok: true });
+});
+app.post("/fixture/practice", (req, res) => {
+  // UI tests share this in-memory server; make the fixture lesson the only resumable one.
+  for (const row of store.db
+    .prepare(
+      "SELECT id FROM lessons WHERE id!=? AND status IN ('active','interrupted')",
+    )
+    .all(l.id))
+    store.finish(row.id, "ended_early");
+  const current = store.lesson(l.id);
+  store.connect(l.id, "fixture-remote");
+  const topic = { ...current.topic, words: ["bus", "train", "sofa"] };
+  store.updateBoard(
+    l.id,
+    `fixture-${Date.now()}`,
+    practiceBoard(
+      {
+        expectedRevision: current.state.revision,
+        mode: req.body.mode,
+        word: req.body.word || "sofa",
+        german: req.body.german || "Sofa",
+        distractors: ["train", "bus"],
+      },
+      topic,
+    ),
+  );
+  classroom.publish(l.id);
+  res.json(store.publicLesson(l.id));
 });
 app.listen(config.port, "127.0.0.1");

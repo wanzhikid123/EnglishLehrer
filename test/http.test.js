@@ -14,7 +14,17 @@ test("local HTTP API initializes history, enforces origins and never returns the
     teacherModel: "teacher-test",
     imageModel: "image-test",
   };
-  const app = createApp({ store, classroom: {}, config });
+  const tempoCalls = [];
+  const app = createApp({
+    store,
+    classroom: {
+      setSpeechTempo: async (id, tempo) => {
+        tempoCalls.push({ id, tempo });
+        return { ok: true, tempo };
+      },
+    },
+    config,
+  });
   const server = createServer(app);
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   t.after(() => {
@@ -65,4 +75,28 @@ test("local HTTP API initializes history, enforces origins and never returns the
     body: "{}",
   });
   assert.equal(broken.status, 400);
+  const emoji = await fetch(base + "/assets/emoji/1f68c.svg");
+  assert.equal(emoji.status, 200);
+  assert.match(emoji.headers.get("content-type"), /image\/svg/);
+  assert.match(await emoji.text(), /<svg/);
+  for (const tempo of [0, 1.5, 6, "4"]) {
+    assert.equal(
+      (
+        await fetch(base + `/api/lessons/${lesson.id}/speech-tempo`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tempo }),
+        })
+      ).status,
+      400,
+    );
+  }
+  assert.equal(tempoCalls.length, 0);
+  const changed = await fetch(base + `/api/lessons/${lesson.id}/speech-tempo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tempo: 4 }),
+  });
+  assert.equal(changed.status, 200);
+  assert.deepEqual(tempoCalls, [{ id: lesson.id, tempo: 4 }]);
 });

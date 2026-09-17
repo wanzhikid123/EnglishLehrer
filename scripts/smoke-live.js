@@ -129,6 +129,14 @@ try {
   console.log("PASS: Real Terra teaching tool updated the board.");
   await page.locator(".speech.teacher").first().waitFor({ timeout: 30000 });
   console.log("PASS: Real teacher transcript received.");
+  await page.getByRole("slider", { name: /Sprechtempo/ }).fill("4");
+  await page
+    .locator(".speech-tempo small")
+    .filter({ hasText: "Ab dem nächsten Satz" })
+    .waitFor({ timeout: 20000 });
+  console.log(
+    "PASS: Live acknowledged the speech tempo instruction without reconnecting.",
+  );
   await page.screenshot({ path: ".cache/classroom-live.png", fullPage: true });
   const state = await (await fetch(base + "/api/home")).json();
   const active = state.history.find((l) => l.status === "active");

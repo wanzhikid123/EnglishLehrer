@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { topics as seedTopics } from "../shared/topics.js";
+import { findEmoji, normalizeVisual } from "./emoji.js";
 import {
   boardToolSchema,
   answerSchema,
@@ -199,6 +200,13 @@ export class Store {
           409,
         );
       if (data.question) {
+        if (
+          ["choice", "german_choice"].includes(data.question.mode) &&
+          data.question.options.length < 2
+        )
+          throw new AppError(
+            "Eine Auswahlfrage braucht mindestens zwei Optionen.",
+          );
         const ids = data.question.options.map((o) => o.id);
         if (
           new Set(ids).size !== ids.length ||
@@ -212,6 +220,17 @@ export class Store {
         )
           throw new AppError("Nutze für eine neue Frage eine neue ID.");
       }
+      // A single unlabeled shape accompanying a single taught object is the old
+      // placeholder pattern. Preserve multi-shape diagrams and ordinary color balls.
+      const shapeCount = data.operations.filter(
+        (op) => op.action === "upsert" && op.element?.type === "shape",
+      ).length;
+      const visualWord =
+        shapeCount === 1 &&
+        data.taught.length === 1 &&
+        findEmoji(data.taught[0].text)
+          ? data.taught[0].text
+          : "";
       for (const op of data.operations) {
         if (op.action === "clear") state.elements = [];
         if (op.action === "remove")
@@ -225,7 +244,7 @@ export class Store {
           )
             throw new AppError("Tafelelement liegt außerhalb der Tafel.");
           state.elements = state.elements.filter((e) => e.id !== op.id);
-          state.elements.push(op.element);
+          state.elements.push(normalizeVisual(op.element, visualWord));
         }
       }
       if (state.elements.length > 20)
@@ -271,7 +290,22 @@ export class Store {
           reason: "Diese Frage ist nicht mehr offen.",
         };
       const option = q.options.find((o) => o.id === data.optionId);
-      if (!data.uncertain && !option)
+      if (
+        q.mode === "picture_speak" &&
+        lesson.state.elements.some((e) => e.type === "image" && !e.src)
+      )
+        return {
+          ok: false,
+          ignored: true,
+          reason:
+            "Das Bild ist noch nicht bereit. Keine Antwort auf ein unsichtbares Bild bewerten.",
+        };
+      const spoken = ["repeat", "picture_speak", "german_speak"].includes(
+        q.mode,
+      );
+      if (spoken && data.mode === "click")
+        throw new AppError("Diese Aufgabe wird mündlich beantwortet.");
+      if (!data.uncertain && !option && !(spoken && data.optionId === null))
         throw new AppError("Bitte wähle eine gültige Antwort.");
       const prior = this.db
         .prepare(
@@ -310,7 +344,9 @@ export class Store {
         outcome === "correct"
           ? "Prima, das stimmt!"
           : outcome === "uncertain"
-            ? "Das habe ich noch nicht sicher verstanden. Sag es noch einmal oder klicke."
+            ? spoken
+              ? "Das habe ich noch nicht sicher verstanden. Sag es bitte noch einmal."
+              : "Das habe ich noch nicht sicher verstanden. Sag es noch einmal oder klicke."
             : "Fast! Versuch es noch einmal. Du schaffst das.";
       this.saveState(id, lesson.state);
       return {
@@ -411,7 +447,7 @@ export class Store {
   mastery(topicId) {
     const rows = this.db
       .prepare(
-        `SELECT a.*,l.topic_id FROM attempts a JOIN lessons l ON l.id=a.lesson_id WHERE l.topic_id=? AND a.outcome!='uncertain' ORDER BY a.created_at DESC`,
+        `SELECT a.*,l.topic_id FROM attempts a JOIN lessons l ON l.id=a.lesson_id JOIN questions q ON q.lesson_id=a.lesson_id AND q.id=a.question_id WHERE l.topic_id=? AND a.outcome!='uncertain' AND COALESCE(json_extract(q.payload,'$.mode'),'choice')!='repeat' ORDER BY a.created_at DESC`,
       )
       .all(topicId);
     const grouped = new Map();
@@ -537,6 +573,14 @@ export class Store {
     if (state.question) {
       delete state.question.correctOptionId;
       delete state.question.hint;
+      if (
+        ["repeat", "picture_speak", "german_speak"].includes(
+          state.question.mode,
+        )
+      ) {
+        state.question.options = [];
+        delete state.question.knowledge;
+      }
     }
     const { remote_id, start_event, ...rest } = l;
     return {

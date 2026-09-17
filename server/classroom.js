@@ -2,6 +2,12 @@ import { randomUUID, createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { AppError } from "./store.js";
+import { searchEmoji } from "./emoji.js";
+import { practiceBoard, isSpokenPractice } from "./practice.js";
+import {
+  DEFAULT_SPEECH_TEMPO,
+  speechTempoInstruction,
+} from "../shared/speech.js";
 import {
   voiceInstructions,
   runTeacher,
@@ -13,6 +19,7 @@ import {
   imageToolSchema,
   hintToolSchema,
   endToolSchema,
+  speechTempoSchema,
 } from "../shared/contracts.js";
 
 export class Classroom {
@@ -59,7 +66,8 @@ export class Classroom {
   publish(id) {
     this.emit(id, "lesson", this.store.publicLesson(id));
   }
-  async connect(id, sdp) {
+  async connect(id, sdp, tempo = DEFAULT_SPEECH_TEMPO) {
+    speechTempoSchema.parse({ tempo });
     const lesson = this.store.lesson(id);
     const room = this.room(id);
     if (!["active", "interrupted"].includes(lesson.status))
@@ -87,7 +95,7 @@ export class Classroom {
       if (room.remoteId) await this.ai.closeLive(room.remoteId, room.socket);
       const result = await this.ai.live(
         sdp,
-        voiceInstructions,
+        voiceInstructions + "\n" + speechTempoInstruction(tempo),
         JSON.stringify(context(this.store, id)),
         room.controller.signal,
       );
@@ -100,6 +108,9 @@ export class Classroom {
         },
       );
       this.store.connect(id, room.remoteId);
+      const current = this.store.lesson(id);
+      current.state.speechTempo = tempo;
+      this.store.saveState(id, current.state);
       this.publish(id);
       return { sdp: result.transport.sdp };
     } catch (e) {
@@ -143,6 +154,36 @@ export class Classroom {
         ? "Verbindung wiederhergestellt: beim gespeicherten Stand fortsetzen."
         : "Stundenbeginn: zeige den ersten altersgerechten Lernschritt und begrüße das Kind.",
     );
+  }
+  setSpeechTempo(id, tempo) {
+    speechTempoSchema.parse({ tempo });
+    const room = this.room(id);
+    const signal = room.controller.signal;
+    room.tempoQueue = (room.tempoQueue || Promise.resolve())
+      .catch(() => {})
+      .then(async () => {
+        this.store.active(id);
+        if (!room.ready || signal.aborted)
+          throw new AppError(
+            "Bitte zuerst die Sprachverbindung herstellen.",
+            409,
+          );
+        if (this.store.lesson(id).state.speechTempo !== tempo) {
+          await this.send(
+            id,
+            "session.instructions.append",
+            speechTempoInstruction(tempo),
+          );
+          if (signal.aborted)
+            throw new AppError("Sprachverbindung unterbrochen.", 409);
+          const current = this.store.active(id);
+          current.state.speechTempo = tempo;
+          this.store.saveState(id, current.state);
+          this.publish(id);
+        }
+        return { ok: true, tempo };
+      });
+    return room.tempoQueue;
   }
   send(id, type, content, delegationId = null) {
     const room = this.room(id);
@@ -274,10 +315,19 @@ export class Classroom {
     const candidates =
       question?.status === "open" && room.inputSpan.questionId === question.id
         ? question.options
-            .flatMap((o, index) => [o.label, ...o.aliases, String(index + 1)])
+            .flatMap((o, index) =>
+              isSpokenPractice(question)
+                ? [o.label]
+                : [o.label, ...o.aliases, String(index + 1)],
+            )
             .map(normalize)
         : [];
     const isAnswer = candidates.includes(heard);
+    const repeatedWord =
+      !question &&
+      this.store
+        .results(id)
+        .taught.some((item) => normalize(item.text) === heard);
     const isRequest =
       /frage|spiel|tipp|hilfe|wiederhol|versteh|zeig|bild|aufhören|aufhoeren|beenden|tschüss|tschuess/.test(
         heard,
@@ -311,7 +361,7 @@ export class Classroom {
               : "Das Kind hat gesprochen oder ein Lernwort nachgesprochen. Die Stimme hat möglicherweise nur kurz gelobt (z.B. Klasse). Prüfe die neue Äußerung, bestätige kurz und liefere jetzt genau einen konkreten nächsten Lernschritt oder eine passende Rückfrage. Nach einer gelungenen Wiederholung sinnvoll weiterführen, nicht nur loben und verstummen. Ohne offene Auswahlfrage kein Quiz-Ergebnis erfinden.",
         );
       },
-      isAnswer || isRequest ? 1700 : 3500,
+      isAnswer || isRequest ? 1700 : repeatedWord ? 2200 : 3500,
     );
   }
   enqueue(id, trigger, delegationId = null) {
@@ -401,11 +451,49 @@ export class Classroom {
   async execute(id, name, args, eventId, latestChild, signal) {
     if (signal.aborted) throw new AppError("Stunde unterbrochen.", 409);
     let result;
-    if (name === "patch_board") {
+    if (name === "search_emoji") {
+      if (
+        typeof args.query !== "string" ||
+        !args.query.trim() ||
+        args.query.length > 100
+      )
+        throw new AppError(
+          "Bitte ein kurzes englisches oder deutsches Suchwort verwenden.",
+        );
+      return { ok: true, matches: searchEmoji(args.query) };
+    }
+    if (name === "show_practice") {
+      const lesson = this.store.active(id);
+      if (lesson.state.question?.status === "open")
+        throw new AppError(
+          "Bitte zuerst die aktuelle Aufgabe beantworten oder ausdrücklich mit patch_board schließen.",
+          409,
+        );
+      args = practiceBoard(args, lesson.topic);
+    }
+    if (name === "patch_board" || name === "show_practice") {
       result = this.store.updateBoard(id, eventId, args);
       this.publish(id);
       await this.waitRendered(id, result.revision, signal);
-      return { ...result, visible: true };
+      const state = this.store.lesson(id).state;
+      const images = [];
+      for (const element of state.elements.filter(
+        (e) => e.missingEmoji && e.imageStatus === "pending",
+      )) {
+        images.push(
+          await this.generateImage(
+            id,
+            {
+              expectedRevision: state.revision,
+              stepId: state.stepId,
+              elementId: element.id,
+              prompt: `One clear child-friendly illustration of ${element.text || element.translation}. Plain white background. Large recognizable object. No text, letters, labels or symbols.`,
+            },
+            signal,
+          ),
+        );
+      }
+      return { ...result, visible: true, question: state.question, images };
     }
     if (name === "record_answer") {
       const answer = voiceAnswerSchema.parse(args);
@@ -536,6 +624,12 @@ export class Classroom {
         target.imageStatus = "ready";
         this.store.saveState(id, current.state);
         this.publish(id);
+        if (this.room(id).ready)
+          this.send(
+            id,
+            "session.commentary.append",
+            `Das Bild ist jetzt auf der aktuellen Tafel bereit. ${current.state.question?.mode === "picture_speak" ? "Frage jetzt: Was siehst du? Sag das englische Wort. Verrate die Lösung nicht." : "Fahre kurz mit der aktuellen Aufgabe fort, ohne eine neue Aufgabe zu erfinden."}`,
+          ).catch(() => {});
       })
       .catch(() => {
         if (signal.aborted) return;
@@ -551,14 +645,20 @@ export class Classroom {
         }
         this.emit(id, "notice", {
           message:
-            "Das Bild konnte nicht geladen werden. Wir lernen mit Wörtern und Formen weiter.",
+            "Das Bild konnte nicht geladen werden. Wir können mündlich weiterüben.",
         });
+        if (this.room(id).ready)
+          this.send(
+            id,
+            "session.commentary.append",
+            "Das aktuelle Bild konnte nicht erstellt werden. Keine Frage zu einem unsichtbaren Bild stellen. Erkläre es kurz und lass den Planer eine mündliche Ersatzübung anbieten.",
+          ).catch(() => {});
       });
     return {
       ok: true,
       status: "loading",
       message:
-        "Das Bild entsteht im Hintergrund. Fahre mit dem aktuellen Wort oder einer mündlichen Übung fort.",
+        "Kein passendes Emoji: GPT Image zeichnet das Bild. Bitte dem Kind kurz sagen, dass es einen Moment dauert. Eine Bildfrage erst stellen, wenn das Bild bereit ist; bis dahin kurz mündlich wiederholen.",
     };
   }
   click(id, data) {

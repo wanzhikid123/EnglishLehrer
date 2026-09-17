@@ -1132,6 +1132,61 @@ button svg {
   max-height: 100%;
   border-radius: 12px;
 }
+.board-element.emoji img {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+.speech-tempo {
+  display: grid;
+  width: 156px;
+  flex-shrink: 0;
+  gap: 2px;
+}
+.speech-tempo label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+.speech-tempo input {
+  width: 100%;
+  height: 16px;
+  margin: 0;
+  accent-color: #638451;
+  cursor: pointer;
+}
+.speech-tempo small,
+.tempo-retry {
+  font-size: 9px;
+  color: #66735b;
+  line-height: 1.2;
+}
+.tempo-retry {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.spoken-practice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 14px;
+  background: #f3f7ed;
+  border-radius: 14px;
+  color: #4d6643;
+}
+@media (max-width: 700px) {
+  .classroom-controls {
+    flex-wrap: wrap;
+  }
+  .speech-tempo {
+    width: 140px;
+  }
+}
 .board-element.highlighted {
   outline: 3px dashed #e3bf60;
   outline-offset: 4px;

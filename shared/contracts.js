@@ -7,7 +7,7 @@ const id = z
 const text = z.string().max(500);
 export const elementSchema = z.object({
   id,
-  type: z.enum(["text", "shape", "image"]),
+  type: z.enum(["text", "shape", "image", "emoji"]),
   text,
   translation: text,
   shape: z.enum(["circle", "square", "triangle", "star", "none"]),
@@ -21,6 +21,15 @@ export const elementSchema = z.object({
 });
 export const questionSchema = z.object({
   id,
+  mode: z
+    .enum([
+      "choice",
+      "repeat",
+      "german_choice",
+      "picture_speak",
+      "german_speak",
+    ])
+    .default("choice"),
   prompt: text,
   knowledge: z.string().min(1).max(100),
   options: z
@@ -33,7 +42,7 @@ export const questionSchema = z.object({
         aliases: z.array(z.string().max(80)).max(10),
       }),
     )
-    .min(2)
+    .min(1)
     .max(4),
   correctOptionId: id,
   hint: text,
@@ -84,6 +93,17 @@ export const endToolSchema = z.object({
   reason: z.enum(["completed", "ended_early"]),
 });
 export const eventIdSchema = id;
+
+export const practiceToolSchema = z.object({
+  expectedRevision: z.number().int().min(0),
+  mode: z.enum(["repeat", "german_choice", "picture_speak", "german_speak"]),
+  word: z.string().trim().min(1).max(80),
+  german: z.string().trim().min(1).max(80),
+  distractors: z.array(z.string().trim().min(1).max(80)).max(3),
+});
+export const speechTempoSchema = z.object({
+  tempo: z.number().int().min(1).max(5),
+});
 
 export const topicSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),

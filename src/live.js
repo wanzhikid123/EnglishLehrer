@@ -1,4 +1,5 @@
 import { lessonApi } from "./api.js";
+import { readSpeechTempo } from "./speech-preference.js";
 
 export async function microphone() {
   if (!navigator.mediaDevices?.getUserMedia)
@@ -138,6 +139,7 @@ export class LiveConnection {
     if (this.closed) throw new Error("Verbindung beendet.");
     const result = await lessonApi(this.id, "/connect", {
       sdp: pc.localDescription.sdp,
+      tempo: readSpeechTempo(),
     });
     if (this.closed) throw new Error("Verbindung beendet.");
     await pc.setRemoteDescription({ type: "answer", sdp: result.sdp });

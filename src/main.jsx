@@ -33,6 +33,7 @@ import { mergeTranscript } from "./transcripts.js";
 import "./styles.css";
 import { PreparationPage } from "./Preparation.jsx";
 import { confirmTopicDeletion } from "./topic-actions.js";
+import { SpeechTempo } from "./SpeechTempo.jsx";
 
 const statusText = {
   active: "In der Stunde",
@@ -969,6 +970,7 @@ function Classroom({ initial, initialStream, onConsumed, onFinish }) {
           </div>
         </div>
         <div className="classroom-controls">
+          <SpeechTempo lessonId={id} connected={connected} />
           <span className={`connection ${status}`}>
             <i />
             {connected
@@ -1063,26 +1065,50 @@ function Classroom({ initial, initialStream, onConsumed, onFinish }) {
                 aria-labelledby="quiz-prompt"
               >
                 <h3 id="quiz-prompt">{q.prompt}</h3>
-                <div className="quiz-options">
-                  {q.options.map((o, i) => (
-                    <button
-                      key={o.id}
-                      onClick={() => answer(o.id)}
-                      disabled={!connected || answerBusy || q.status !== "open"}
-                    >
-                      <span className="option-number">{i + 1}</span>
-                      {o.color ? (
-                        <span
-                          className="option-color"
-                          style={{ background: o.color }}
-                        />
-                      ) : o.emoji ? (
-                        <span className="option-emoji">{o.emoji}</span>
-                      ) : null}
-                      <strong>{o.label}</strong>
-                    </button>
-                  ))}
-                </div>
+                {["repeat", "picture_speak", "german_speak"].includes(
+                  q.mode,
+                ) ? (
+                  <div className="spoken-practice">
+                    <Mic size={24} />
+                    <span>
+                      {q.status === "answered"
+                        ? "Gut gemacht!"
+                        : lesson.state.elements.some(
+                              (e) =>
+                                e.type === "image" &&
+                                !e.src &&
+                                e.imageStatus !== "failed",
+                            )
+                          ? "Dein Bild entsteht. Einen Moment, bitte …"
+                          : q.mode === "repeat"
+                            ? "Hör Mia zu. Dann bist du dran."
+                            : "Du bist dran. Sag das englische Wort."}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="quiz-options">
+                    {q.options.map((o, i) => (
+                      <button
+                        key={o.id}
+                        onClick={() => answer(o.id)}
+                        disabled={
+                          !connected || answerBusy || q.status !== "open"
+                        }
+                      >
+                        <span className="option-number">{i + 1}</span>
+                        {o.color ? (
+                          <span
+                            className="option-color"
+                            style={{ background: o.color }}
+                          />
+                        ) : o.emoji ? (
+                          <span className="option-emoji">{o.emoji}</span>
+                        ) : null}
+                        <strong>{o.label}</strong>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="quiz-bottom">
                   <span
                     className={
@@ -1091,7 +1117,12 @@ function Classroom({ initial, initialStream, onConsumed, onFinish }) {
                         : "quiz-feedback"
                     }
                   >
-                    {q.feedback || "Klicke auf eine Antwort oder sag sie laut."}
+                    {q.feedback ||
+                      (["repeat", "picture_speak", "german_speak"].includes(
+                        q.mode,
+                      )
+                        ? "Mia hört dir zu. Lass dir Zeit."
+                        : "Klicke auf eine Antwort oder sag sie laut.")}
                   </span>
                   {q.status === "open" && (
                     <button disabled={!connected} onClick={hint}>
@@ -1284,8 +1315,10 @@ function BoardElement({ element: e }) {
             {e.imageStatus === "failed"
               ? "Wir lernen mit Wörtern weiter."
               : e.imageStatus === "loading"
-                ? "Dein Bild entsteht …"
-                : e.text || "Ein Bild für dich"}
+                ? "GPT Image zeichnet dein Bild. Einen Moment, bitte …"
+                : e.missingEmoji
+                  ? "Kein passendes Emoji. Ein Bild wird für dich gezeichnet …"
+                  : e.text || "Ein Bild für dich"}
           </span>
         </div>
       )}

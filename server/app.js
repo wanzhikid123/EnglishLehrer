@@ -4,6 +4,9 @@ import { existsSync } from "node:fs";
 import { z } from "zod";
 import { AppError } from "./store.js";
 import { answerSchema, eventIdSchema } from "../shared/contracts.js";
+import { speechTempoSchema } from "../shared/contracts.js";
+import { DEFAULT_SPEECH_TEMPO } from "../shared/speech.js";
+import { emojiDirectory } from "./emoji.js";
 import { root } from "./config.js";
 import { transcriptionRouter } from "./transcription.js";
 
@@ -92,10 +95,17 @@ export function createApp({ store, classroom, config, preparation, ai }) {
     req.on("close", () => clearInterval(keepalive));
   });
   app.post("/api/lessons/:id/connect", async (req, res) => {
-    const { sdp } = z
-      .object({ sdp: z.string().min(20).max(80000) })
+    const { sdp, tempo } = z
+      .object({
+        sdp: z.string().min(20).max(80000),
+        tempo: speechTempoSchema.shape.tempo.default(DEFAULT_SPEECH_TEMPO),
+      })
       .parse(req.body);
-    res.json(await classroom.connect(req.params.id, sdp));
+    res.json(await classroom.connect(req.params.id, sdp, tempo));
+  });
+  app.post("/api/lessons/:id/speech-tempo", async (req, res) => {
+    const { tempo } = speechTempoSchema.parse(req.body);
+    res.json(await classroom.setSpeechTempo(req.params.id, tempo));
   });
   app.post("/api/lessons/:id/ready", async (req, res) => {
     await classroom.ready(req.params.id);
@@ -148,6 +158,15 @@ export function createApp({ store, classroom, config, preparation, ai }) {
     await classroom.end(req.params.id, status);
     res.json(store.publicLesson(req.params.id));
   });
+  app.use(
+    "/assets/emoji",
+    express.static(emojiDirectory, {
+      index: false,
+      maxAge: "1y",
+      immutable: true,
+      fallthrough: false,
+    }),
+  );
   app.use(
     "/assets/teaching",
     express.static(join(config.dataDir, "images"), {
