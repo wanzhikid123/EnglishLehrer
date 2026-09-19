@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { topics as seedTopics } from "../shared/topics.js";
 import { findEmoji, normalizeVisual } from "./emoji.js";
+import { wordMastery, dueReviews } from "./review.js";
 import {
   boardToolSchema,
   answerSchema,
@@ -22,7 +23,7 @@ export class Store {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     const version = this.db.prepare("PRAGMA user_version").get().user_version;
-    if (version > 3) {
+    if (version > 4) {
       this.db.close();
       throw new AppError(
         "Diese Datenbank wurde mit einer neueren Version erstellt.",
@@ -46,6 +47,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS events (event_id TEXT PRIMARY KEY, lesson_id TEXT REFERENCES lessons(id), kind TEXT, created_at INTEGER, result TEXT);
       CREATE TABLE IF NOT EXISTS images (hash TEXT PRIMARY KEY, path TEXT NOT NULL, topic_id TEXT, knowledge TEXT, created_at INTEGER);
       CREATE TABLE IF NOT EXISTS topics (id TEXT PRIMARY KEY, payload TEXT NOT NULL, revision INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS lesson_plans (topic_id TEXT PRIMARY KEY, topic_revision INTEGER NOT NULL, revision INTEGER NOT NULL, payload TEXT NOT NULL, updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS deleted_topics (id TEXT PRIMARY KEY, deleted_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS preparation_context (id INTEGER PRIMARY KEY CHECK(id=1), generation INTEGER NOT NULL);
       INSERT OR IGNORE INTO preparation_context VALUES(1,0);
@@ -79,7 +81,7 @@ export class Store {
           this.saveState(row.id, state);
         }
       }
-      this.db.exec("PRAGMA user_version=3");
+      this.db.exec("PRAGMA user_version=4");
     });
   }
   transaction(fn) {
@@ -114,7 +116,7 @@ export class Store {
       throw new AppError("Verbinde die Stunde zuerst erneut.", 409);
     return lesson;
   }
-  create(topicId, eventId) {
+  create(topicId, eventId, planSnapshot = null) {
     const prior = this.db
       .prepare("SELECT id FROM lessons WHERE start_event=?")
       .get(eventId);
@@ -137,6 +139,10 @@ export class Store {
       phase: "warmup",
       readyToFinish: false,
       topicSnapshot: topic,
+      planSnapshot:
+        typeof planSnapshot === "function" ? planSnapshot() : planSnapshot,
+      planCursor: 0,
+      preparedQuestionId: null,
     };
     this.db
       .prepare(
@@ -447,61 +453,19 @@ export class Store {
   mastery(topicId) {
     const rows = this.db
       .prepare(
-        `SELECT a.*,l.topic_id FROM attempts a JOIN lessons l ON l.id=a.lesson_id JOIN questions q ON q.lesson_id=a.lesson_id AND q.id=a.question_id WHERE l.topic_id=? AND a.outcome!='uncertain' AND COALESCE(json_extract(q.payload,'$.mode'),'choice')!='repeat' ORDER BY a.created_at DESC`,
+        `SELECT a.*,COALESCE(json_extract(q.payload,'$.mode'),'choice') AS practice_mode FROM attempts a JOIN lessons l ON l.id=a.lesson_id JOIN questions q ON q.lesson_id=a.lesson_id AND q.id=a.question_id WHERE l.topic_id=? ORDER BY a.created_at DESC,a.rowid DESC`,
       )
       .all(topicId);
-    const grouped = new Map();
-    for (const row of rows) {
-      if (!grouped.has(row.knowledge)) grouped.set(row.knowledge, []);
-      grouped.get(row.knowledge).push(row);
-    }
-    const assessed = [...grouped].map(([knowledge, history]) => {
-      const recent = history.slice(0, 6),
-        independent = recent.filter(
-          (a) => a.outcome === "correct" && !a.hinted,
-        );
-      const separateLessons = new Set(independent.map((a) => a.lesson_id)).size;
-      const latest = recent[0];
-      const mastered =
-        independent.length >= 3 &&
-        separateLessons >= 2 &&
-        recent.filter((a) => a.outcome === "incorrect").length <= 1 &&
-        latest.outcome === "correct";
-      const review =
-        latest.outcome === "incorrect" ||
-        Boolean(latest.hinted) ||
-        recent.filter((a) => a.outcome === "incorrect").length >= 2;
-      return {
-        knowledge,
-        status: mastered ? "developing" : review ? "review" : "observing",
-        reason: mastered
-          ? "Mehrmals selbstständig in verschiedenen Stunden richtig."
-          : review
-            ? "Mit Hilfe oder noch verwechselt – wir üben weiter."
-            : "Erste Erfahrungen gesammelt; wir beobachten weiter.",
-        updatedAt: latest.created_at,
-        independent: independent.length,
-        attemptCount: history.length,
-      };
-    });
     const introduced = this.db
       .prepare(
-        `SELECT t.text,MAX(t.taught_at) AS updatedAt FROM taught t JOIN lessons l ON l.id=t.lesson_id WHERE l.topic_id=? GROUP BY t.text`,
+        `SELECT t.text,MIN(t.taught_at) AS updatedAt FROM taught t JOIN lessons l ON l.id=t.lesson_id WHERE l.topic_id=? GROUP BY t.text`,
       )
       .all(topicId);
-    return [
-      ...assessed,
-      ...introduced
-        .filter((item) => !grouped.has(item.text))
-        .map((item) => ({
-          knowledge: item.text,
-          status: "observing",
-          reason: "Kennengelernt, aber noch ohne eindeutigen Übungsbeleg.",
-          updatedAt: item.updatedAt,
-          independent: 0,
-          attemptCount: 0,
-        })),
-    ];
+    return wordMastery(rows, introduced, this.now());
+  }
+  reviewQueue(topicId, limit = 3) {
+    const topic = this.topic(topicId);
+    return topic ? dueReviews(this.mastery(topicId), topic, limit) : [];
   }
   home() {
     const lessons = this.db
@@ -515,7 +479,9 @@ export class Store {
       const mastery = this.mastery(t.id),
         review = mastery.filter((m) => m.status === "review");
       const last = history[0]?.started_at;
-      const overdue = learned && last && this.now() - last > 7 * 86400000;
+      const due = this.reviewQueue(t.id, 80);
+      const overdue = due.length > 0;
+      const plan = this.lessonPlan(t.id);
       return {
         ...t,
         experience: learned ? "learned" : history.length ? "learning" : "new",
@@ -523,6 +489,9 @@ export class Store {
         lessonCount: history.length,
         mastery,
         review,
+        dueReviews: due,
+        preparedSteps:
+          plan?.topicRevision === t.revision ? plan.steps.length : 0,
         priority: review.length
           ? 100 + review.length
           : overdue
@@ -533,7 +502,7 @@ export class Store {
         reason: review.length
           ? "Ein paar Wörter freuen sich auf eine Wiederholung."
           : overdue
-            ? "Das ist schon eine Weile her. Frischen wir es auf!"
+            ? `${due.length} Wörter sind zum Wiederholen bereit.`
             : !history.length
               ? index === 0
                 ? "Ein leichter Einstieg in dein erstes Englisch-Abenteuer."
@@ -570,6 +539,9 @@ export class Store {
   publicLesson(id) {
     const l = this.lesson(id);
     const state = structuredClone(l.state);
+    // The parent preview lives on its own endpoint. Future answers never appear
+    // in the classroom snapshot or the child's caption context.
+    delete state.planSnapshot;
     if (state.question) {
       delete state.question.correctOptionId;
       delete state.question.hint;
@@ -594,6 +566,46 @@ export class Store {
     this.db
       .prepare("UPDATE lessons SET summary=?,summary_status=? WHERE id=?")
       .run(JSON.stringify(summary), status, id);
+  }
+  lessonPlan(topicId) {
+    const row = this.db
+      .prepare("SELECT * FROM lesson_plans WHERE topic_id=?")
+      .get(topicId);
+    return row
+      ? {
+          ...JSON.parse(row.payload),
+          topicId,
+          topicRevision: row.topic_revision,
+          revision: row.revision,
+          updatedAt: row.updated_at,
+        }
+      : null;
+  }
+  saveLessonPlan(topicId, topicRevision, expectedRevision, plan) {
+    return this.transaction(() => {
+      if (this.topic(topicId)?.revision !== topicRevision)
+        throw new AppError(
+          "Das Thema wurde geändert. Bitte den Unterrichtsplan neu erstellen.",
+          409,
+        );
+      if ((this.lessonPlan(topicId)?.revision || 0) !== expectedRevision)
+        throw new AppError(
+          "Der Unterrichtsplan wurde inzwischen geändert. Bitte neu laden.",
+          409,
+        );
+      this.db
+        .prepare(
+          "INSERT INTO lesson_plans VALUES(?,?,?,?,?) ON CONFLICT(topic_id) DO UPDATE SET topic_revision=excluded.topic_revision,revision=excluded.revision,payload=excluded.payload,updated_at=excluded.updated_at",
+        )
+        .run(
+          topicId,
+          topicRevision,
+          expectedRevision + 1,
+          JSON.stringify(plan),
+          this.now(),
+        );
+      return this.lessonPlan(topicId);
+    });
   }
   topics() {
     return this.db

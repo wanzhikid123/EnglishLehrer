@@ -170,7 +170,7 @@ test("stale board revisions reject whole changes and question IDs cannot be reus
   assert.throws(() => store.updateBoard(id, "reuse", board(1)));
   assert.equal(store.lesson(id).state.revision, 1);
 });
-test("one correct answer is not mastery; repeated independent evidence across courses can be", (t) => {
+test("repeated choice evidence improves recognition without claiming independent speaking", (t) => {
   const { store, id, advance } = setup(t);
   store.updateBoard(id, "step", board());
   store.answer(id, answer());
@@ -185,7 +185,12 @@ test("one correct answer is not mastery; repeated independent evidence across co
   advance(8000);
   store.updateBoard(l.id, "s3", board(1, question("q2")));
   store.answer(l.id, answer({ eventId: "a3", questionId: "q2" }));
-  assert.equal(store.mastery("colors")[0].status, "developing");
+  assert.equal(
+    store.mastery("colors")[0].skills.recognition.status,
+    "developing",
+  );
+  assert.equal(store.mastery("colors")[0].status, "observing");
+  assert.equal(store.mastery("colors")[0].skills.speaking.attemptCount, 0);
   store.finish(l.id, "ended_early");
   assert.equal(
     store.home().topics.find((t) => t.id === "colors").experience,

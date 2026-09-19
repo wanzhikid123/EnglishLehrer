@@ -3,6 +3,8 @@ node_modules/
 dist/
 coverage/
 .vite/
+.eslintcache
+*.tsbuildinfo
 
 # Local application state and generated media
 data/
@@ -15,6 +17,8 @@ temp/
 *.db-wal
 *.sqlite
 *.sqlite3
+*.pid
+*.pid.lock
 
 # Test artifacts
 test-results/
@@ -35,10 +39,14 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+.npmrc
 *.pem
 *.key
+*.ppk
 *.p12
 *.pfx
+*.jks
+*.keystore
 
 # Editors and operating-system files
 .vscode/

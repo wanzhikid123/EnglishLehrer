@@ -189,6 +189,58 @@ const preparation = new Preparation(store, {
   },
 });
 const ai = {
+  async responses(input) {
+    const data = JSON.parse(input[0].content);
+    return {
+      output: [
+        {
+          type: "function_call",
+          name: "save_lesson_plan",
+          arguments: JSON.stringify({
+            goal: "Tiere erkennen und selbst benennen.",
+            steps: [
+              {
+                id: "cat",
+                stage: "new",
+                seconds: 45,
+                mode: "repeat",
+                word: "cat",
+                german: "Katze",
+                distractors: [],
+              },
+              {
+                id: "dog",
+                stage: "new",
+                seconds: 45,
+                mode: "repeat",
+                word: "dog",
+                german: "Hund",
+                distractors: [],
+              },
+              {
+                id: "choice",
+                stage: "practice",
+                seconds: 45,
+                mode: "german_choice",
+                word: "cat",
+                german: "Katze",
+                distractors: ["dog"],
+              },
+              {
+                id: "speak",
+                stage: "practice",
+                seconds: 45,
+                mode: "picture_speak",
+                word: "dog",
+                german: "Hund",
+                distractors: [],
+              },
+            ],
+          }),
+        },
+      ],
+    };
+  },
   async transcribe(audio, mimeType, language) {
     if (!audio.length || !mimeType.startsWith("audio/"))
       throw new Error("Invalid fixture audio");

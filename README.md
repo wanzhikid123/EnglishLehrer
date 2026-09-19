@@ -25,6 +25,11 @@ npm.cmd start
 
 ## 已实现功能
 
+- **可执行教案**：在 **Vorbereitung** 选择主题，再点 **Unterrichtsplan & Lernbelege → Plan erstellen**。AI 根据主题、已教内容和到期复习词生成具体步骤；可预览白板、上下移动步骤、修改练习方式、德语含义和预计时间，再点 **Plan speichern & Bilder vorbereiten**。时间仅供备课参考，绝不作为孩子的答题倒计时。调整后若把未教单词的测验放到示范之前，会提示修正并保留旧计划。
+- **课前素材准备**：优先使用本地 emoji，图片练习缺少素材时在备课阶段生成并缓存插图，显示准备进度。失败的图片题明确回退到“德语→英语口说”，保存计划可重试；课堂不提问不可见图片。预览与预取不会产生学习记录。
+- **更快的课堂衔接**：新课使用所选主题的已保存教案快照，在孩子回答时提前编译后续白板。点击结果可直接使用下一步；口头回答经过一次后台判断后执行已准备步骤，省去常规路径重新出题和工具结果后的文字改写。先确认白板已渲染再发出语音提示。临时请求、复杂回答、计划耗尽或收尾仍由完整教学规划处理。没有有效教案时保留原课堂流程。
+- **按词、按能力复习**：学习进度和备课页分别显示“选择识别”和“独立口说”的证据与下次复习时间，不把选择题当成英语听力测评。跟读、未回答和不确定识别不提升独立掌握，也不推迟复习。默认按不同课堂中的连续独立成功采用 1、3、7、14、30 天间隔，错误或提示后成功缩短到一天；这是产品默认策略。新课开头安排最多三个到期词，缺少预备材料时由教学后台补充。备课调整不修改已开始课堂的快照和结果。
+
 - 德语首页：自由选题、学习计划、基于本地练习表现的推荐、已学主题和完整课程历史。
 - 七个起始主题：问候、颜色、数字、动物、家庭、常见物品、星期；每个主题都可反复学习。
 - 首页 **Vorbereitung / Unterricht vorbereiten（备课与复盘）**：与后台 AI 用中文或德语聊天，创建新主题、给现有主题补词汇和句型、修改教学目标与安排，也可选一节历史课堂做课后总结。主题和备课聊天保存至本地数据库；修改结果会显示在聊天和右侧主题预览中。
@@ -113,6 +118,9 @@ npm.cmd test                     # 本地状态、数据一致性及字幕测试
 npm.cmd run build               # 构建检查
 npm.cmd run test:browser        # 本地浏览器流程测试，不调用 API
 npm.cmd run check:api           # 检查四个模型的账号访问权限
+node scripts/smoke-lesson-plans.js # 真实生成教案、口头答案判断、临时请求分流；内存测试库
+node scripts/smoke-plan-image.js # 真实课前图片生成、PNG 校验与缓存复用；隔离目录
+node scripts/smoke-live.js --prepared # 预备教案 + 真实 WebRTC + 合成 Monday 语音继续到 Tuesday
 node scripts/check-api.js --response  # 额外进行一次极短的真实教学模型调用
 node scripts/smoke-live.js --repeat   # 合成 Monday 跟读后，验证真实语音/白板继续到 Tuesday
 node scripts/smoke-preparation.js     # 真实后台修改星期/颜色并新建水果主题，只使用内存测试库
@@ -135,6 +143,11 @@ node scripts/smoke-transcription.js .cache/test-speech/question-transcription.we
 - **端口已被占用**：访问现有实例，或启动前设置 `ENGLISH_PORT`。
 
 ## 实现结构
+
+- `server/lesson-plans.js`：教案校验、课前素材准备、预览与新课堂快照；SQLite 数据版本从 3 升级至 4，保留原数据。
+- `server/prepared-lesson.js`：无副作用预取、单次模型判断、当前题目的提示/继续分支和浏览器渲染确认。
+- `server/review.js`：依据历史题型与答题证据分开计算识别、口说状态和复习时间。
+- `src/LessonPlan.jsx`：家长教案编辑、白板预览与按词能力明细。
 
 - `server/store.js`：SQLite 事务、学习记录、去重、状态恢复和可追溯的掌握判断。
 - `server/classroom.js`：每课串行教学队列、Live 服务端控制连接、浏览器渲染确认、图片过期检查及清理。

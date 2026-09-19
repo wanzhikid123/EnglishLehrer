@@ -5,11 +5,13 @@ import { OpenAIService } from "./openai.js";
 import { Classroom } from "./classroom.js";
 import { createApp } from "./app.js";
 import { Preparation } from "./preparation.js";
+import { LessonPlans } from "./lesson-plans.js";
 const store = new Store(join(config.dataDir, "learning.sqlite"));
 const ai = new OpenAIService(config);
 const classroom = new Classroom(store, ai, config);
 const preparation = new Preparation(store, ai);
-const app = createApp({ store, classroom, config, preparation, ai });
+const plans = new LessonPlans(store, ai, config);
+const app = createApp({ store, classroom, config, preparation, ai, plans });
 const server = app.listen(config.port, "127.0.0.1", () => {
   // Recover only after owning the port. A second launch must not interrupt the running instance.
   store.recoverPreparation();
@@ -37,6 +39,7 @@ async function stop() {
   clearInterval(sweep);
   await classroom.shutdown();
   await preparation.shutdown();
+  await plans.shutdown();
   server.close();
   server.closeAllConnections();
   store.close();

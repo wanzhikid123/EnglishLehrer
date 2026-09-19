@@ -3,7 +3,8 @@ import { chromium } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-const repeatTest = process.argv.includes("--repeat");
+const preparedTest = process.argv.includes("--prepared");
+const repeatTest = process.argv.includes("--repeat") || preparedTest;
 const base = "http://127.0.0.1:3212";
 mkdirSync(".cache", { recursive: true });
 const service = spawn(process.execPath, ["server/index.js"], {
@@ -105,6 +106,54 @@ try {
     .waitFor();
   await page.screenshot({ path: ".cache/home-desktop.png", fullPage: true });
   const home = await (await fetch(base + "/api/home")).json();
+  if (preparedTest) {
+    const saved = await fetch(base + "/api/topics/days/plan/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expectedTopicRevision: home.topics.find((t) => t.id === "days")
+          .revision,
+        expectedRevision: 0,
+        plan: {
+          goal: "Monday und Tuesday nachsprechen.",
+          steps: [
+            {
+              id: "monday",
+              stage: "new",
+              seconds: 45,
+              mode: "repeat",
+              word: "Monday",
+              german: "Montag",
+              distractors: [],
+            },
+            {
+              id: "tuesday",
+              stage: "new",
+              seconds: 45,
+              mode: "repeat",
+              word: "Tuesday",
+              german: "Dienstag",
+              distractors: [],
+            },
+            {
+              id: "monday-recall",
+              stage: "practice",
+              seconds: 45,
+              mode: "german_speak",
+              word: "Monday",
+              german: "Montag",
+              distractors: [],
+            },
+          ],
+        },
+      }),
+    });
+    if (!saved.ok)
+      throw new Error("Could not save the prepared lesson fixture.");
+    console.log(
+      "PASS: Prepared lesson saved before starting the voice connection.",
+    );
+  }
   if (home.pending) {
     await page.getByRole("button", { name: "Stunde öffnen" }).click();
     await page
@@ -126,7 +175,11 @@ try {
     .waitFor({ timeout: 60000 });
   console.log("PASS: Real Live WebRTC connected.");
   await page.locator(".board-element").first().waitFor({ timeout: 90000 });
-  console.log("PASS: Real Terra teaching tool updated the board.");
+  console.log(
+    preparedTest
+      ? "PASS: Prepared first step rendered before any answer."
+      : "PASS: Real Terra teaching tool updated the board.",
+  );
   await page.locator(".speech.teacher").first().waitFor({ timeout: 30000 });
   console.log("PASS: Real teacher transcript received.");
   await page.getByRole("slider", { name: /Sprechtempo/ }).fill("4");
@@ -178,6 +231,15 @@ try {
       )
     )
       throw new Error("The next weekday was not recorded as taught.");
+    if (
+      preparedTest &&
+      (detail.state.planCursor !== 2 ||
+        detail.results.attempts.filter((a) => a.outcome === "correct")
+          .length !== 1)
+    )
+      throw new Error(
+        "Prepared plan did not advance exactly once after confirmed speech.",
+      );
     console.log(
       "PASS: Real spoken Monday led to the next weekday on the board and in teacher speech.",
     );

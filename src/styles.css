@@ -2241,6 +2241,207 @@ button svg {
   flex: 1;
   min-height: 0;
 }
+
+.preparation-page:has(.lesson-plan-editor) {
+  height: auto;
+  min-height: calc(100vh - 100px);
+}
+.prep-tabs {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.prep-tabs .button {
+  padding: 8px 13px;
+  font-size: 12px;
+}
+.lesson-plan-editor {
+  background: #fff;
+  border: 1px solid #dfe6d7;
+  border-radius: 18px;
+  padding: 24px;
+  margin-top: 24px;
+}
+.lesson-plan-editor h2 {
+  font-size: 24px;
+}
+.lesson-plan-editor p,
+.lesson-plan-editor small {
+  line-height: 1.6;
+}
+.lesson-plan-editor input,
+.lesson-plan-editor select {
+  width: 100%;
+  padding: 9px;
+  border: 1px solid #d2ddcb;
+  border-radius: 8px;
+  font: inherit;
+  background: white;
+}
+.lesson-plan-editor label {
+  display: grid;
+  gap: 5px;
+  font-size: 13px;
+}
+.plan-goal {
+  margin: 18px 0;
+}
+.plan-status,
+.plan-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.plan-status {
+  color: #4e6c43;
+}
+.plan-reviews {
+  background: #f3f7eb;
+  border-radius: 12px;
+  padding: 12px 18px;
+}
+.plan-workspace {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr);
+  gap: 24px;
+}
+.plan-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 620px;
+  overflow: auto;
+}
+.plan-steps li {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid #e0e6d9;
+  border-radius: 10px;
+  margin-bottom: 8px;
+}
+.plan-steps li.selected {
+  background: #f0f6e5;
+  border-color: #7d9c5f;
+}
+.plan-step-select {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 10px 12px;
+  color: inherit;
+  cursor: pointer;
+}
+.plan-step-select span,
+.plan-step-select small {
+  font-size: 11px;
+}
+.plan-move {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 4px;
+}
+.plan-move button {
+  border: 0;
+  background: transparent;
+  padding: 6px;
+  cursor: pointer;
+  color: inherit;
+}
+.plan-move button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.plan-fields {
+  display: grid;
+  grid-template-columns: 2fr 2fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.plan-fields label:last-child:nth-child(4) {
+  grid-column: 1 / -1;
+}
+.plan-board {
+  position: relative;
+  height: 260px;
+  background: #fff;
+  border: 1px solid #dce3d5;
+  border-radius: 12px;
+  container-type: inline-size;
+}
+.plan-board .board-element {
+  font-size: clamp(16px, 6cqw, var(--board-font-size)) !important;
+}
+.plan-preview {
+  margin-top: 14px;
+}
+.plan-branches {
+  font-size: 12px;
+  color: #607057;
+  background: #f6f7f2;
+  padding: 12px;
+  border-radius: 10px;
+}
+.plan-actions {
+  margin-top: 18px;
+  font-size: 12px;
+}
+.plan-evidence {
+  margin-top: 18px;
+}
+.plan-evidence summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.word-progress {
+  overflow-x: auto;
+  margin-top: 12px;
+}
+.word-progress table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+  text-align: left;
+}
+.word-progress td,
+.word-progress th {
+  padding: 10px;
+  border-bottom: 1px solid #e6ebdf;
+}
+.word-progress small {
+  display: block;
+  margin-top: 10px;
+  font-size: 11px;
+  color: #65755d;
+}
+@media (max-width: 760px) {
+  .lesson-plan-editor {
+    padding: 16px;
+  }
+  .lesson-plan-editor .section-heading {
+    align-items: flex-start;
+    gap: 12px;
+    flex-direction: column;
+  }
+  .plan-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .plan-steps {
+    max-height: 280px;
+  }
+  .plan-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .preparation-page:has(.lesson-plan-editor) .prep-layout {
+    height: auto;
+  }
+}
 .prep-chat {
   background: white;
   border: 1px solid #dfe6d7;

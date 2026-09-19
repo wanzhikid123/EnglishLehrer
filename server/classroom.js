@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { AppError } from "./store.js";
 import { searchEmoji } from "./emoji.js";
 import { practiceBoard, isSpokenPractice } from "./practice.js";
+import { PreparedLesson } from "./prepared-lesson.js";
 import {
   DEFAULT_SPEECH_TEMPO,
   speechTempoInstruction,
@@ -29,6 +30,7 @@ export class Classroom {
     this.config = config;
     this.rooms = new Map();
     this.clients = new Map();
+    this.prepared = new PreparedLesson(this);
   }
   room(id) {
     if (!this.rooms.has(id))
@@ -46,6 +48,7 @@ export class Classroom {
         closing: false,
         wrapSent: false,
         busy: 0,
+        inputVersion: 0,
       });
     return this.rooms.get(id);
   }
@@ -90,13 +93,15 @@ export class Classroom {
       room.transcripts = [];
       room.inputSpan = null;
       room.plannedInput = null;
+      room.inputVersion++;
+      room.preparedNext = null;
       clearTimeout(room.answerCheckTimer);
       room.rendered = -1;
       if (room.remoteId) await this.ai.closeLive(room.remoteId, room.socket);
       const result = await this.ai.live(
         sdp,
         voiceInstructions + "\n" + speechTempoInstruction(tempo),
-        JSON.stringify(context(this.store, id)),
+        JSON.stringify(context(this.store, id, { voice: true })),
         room.controller.signal,
       );
       room.remoteId = result.session.id;
@@ -130,6 +135,7 @@ export class Classroom {
     this.store.active(id);
     if (room.ready) return;
     room.ready = true;
+    this.prepared.warm(id);
     const resume = this.store.lesson(id).state.revision > 0;
     this.send(
       id,
@@ -259,6 +265,7 @@ export class Classroom {
       const isChild = event.type === "session.input_transcript.delta";
       const q = this.store.lesson(id).state.question;
       if (isChild) {
+        room.inputVersion++;
         if (!room.inputSpan || event.start_ms - room.inputSpan.end > 1500) {
           room.inputSpan = {
             start: event.start_ms,
@@ -343,7 +350,8 @@ export class Classroom {
         if (room.closing || current.status !== "active") return;
         if (
           room.plannedInput?.start === input.start &&
-          room.plannedInput.end >= input.end
+          room.plannedInput.end >= input.end &&
+          room.plannedInput.version === room.inputVersion
         )
           return;
         if (
@@ -364,7 +372,7 @@ export class Classroom {
       isAnswer || isRequest ? 1700 : repeatedWord ? 2200 : 3500,
     );
   }
-  enqueue(id, trigger, delegationId = null) {
+  enqueue(id, trigger, delegationId = null, confirmedAnswer = null) {
     const room = this.room(id);
     const signal = room.controller.signal;
     if (room.busy >= 6 || room.closing) return;
@@ -372,8 +380,10 @@ export class Classroom {
       room.plannedInput = {
         start: room.inputSpan.start,
         end: room.inputSpan.end,
+        version: room.inputVersion,
       };
     const taskVersion = (room.taskVersion = (room.taskVersion || 0) + 1);
+    const inputVersion = room.inputVersion;
     // Freeze question attribution at delegation time; queued work must not reinterpret old speech against a new question.
     const captured = structuredClone(room.transcripts);
     const childParts = captured.filter((t) => t.role === "child");
@@ -396,20 +406,38 @@ export class Classroom {
     room.queue = room.queue
       .catch(() => {})
       .then(async () => {
-        if (signal.aborted || !room.ready) return;
+        if (signal.aborted || !room.ready || inputVersion !== room.inputVersion)
+          return;
         this.emit(id, "thinking", { busy: true });
         try {
-          const text = await runTeacher({
-            store: this.store,
-            ai: this.ai,
+          let text = await this.prepared.run({
             id,
             trigger,
             transcripts: captured,
+            latestChild,
             signal,
-            execute: (name, args, callId) =>
-              this.execute(id, name, args, callId, latestChild, signal),
+            confirmedAnswer,
+            inputVersion,
           });
-          if (signal.aborted || !room.ready || taskVersion !== room.taskVersion)
+          if (signal.aborted || inputVersion !== room.inputVersion) return;
+          if (text === null)
+            text = await runTeacher({
+              store: this.store,
+              ai: this.ai,
+              id,
+              trigger,
+              transcripts: captured,
+              signal,
+              isCurrent: () => inputVersion === room.inputVersion,
+              execute: (name, args, callId) =>
+                this.execute(id, name, args, callId, latestChild, signal),
+            });
+          if (
+            signal.aborted ||
+            !room.ready ||
+            taskVersion !== room.taskVersion ||
+            inputVersion !== room.inputVersion
+          )
             return;
           if (text) {
             await this.send(
@@ -451,6 +479,16 @@ export class Classroom {
   async execute(id, name, args, eventId, latestChild, signal) {
     if (signal.aborted) throw new AppError("Stunde unterbrochen.", 409);
     let result;
+    if (name === "use_prepared_step") {
+      const nextSpeech = await this.prepared.present(id, signal);
+      return {
+        ok: Boolean(nextSpeech),
+        nextSpeech,
+        message: nextSpeech
+          ? "Vorbereitete Tafel bestätigt."
+          : "Kein weiterer vorbereiteter Schritt vorhanden.",
+      };
+    }
     if (name === "search_emoji") {
       if (
         typeof args.query !== "string" ||
@@ -473,6 +511,9 @@ export class Classroom {
     }
     if (name === "patch_board" || name === "show_practice") {
       result = this.store.updateBoard(id, eventId, args);
+      const changed = this.store.lesson(id);
+      changed.state.preparedQuestionId = null;
+      this.store.saveState(id, changed.state);
       this.publish(id);
       await this.waitRendered(id, result.revision, signal);
       const state = this.store.lesson(id).state;
@@ -668,6 +709,8 @@ export class Classroom {
       this.enqueue(
         id,
         `Klickantwort bereits gespeichert: ${JSON.stringify(result)}. NICHT erneut bewerten oder speichern. Bestätige das Ergebnis. Bei Fehler Tipp und erneuten Versuch, bei Erfolg nächsten passenden Schritt vorbereiten.`,
+        null,
+        result,
       );
     return result;
   }

@@ -33,6 +33,8 @@ import { mergeTranscript } from "./transcripts.js";
 import "./styles.css";
 import { PreparationPage } from "./Preparation.jsx";
 import { confirmTopicDeletion } from "./topic-actions.js";
+import { BoardElement } from "./BoardElement.jsx";
+import { WordProgress } from "./LessonPlan.jsx";
 import { SpeechTempo } from "./SpeechTempo.jsx";
 
 const statusText = {
@@ -94,6 +96,7 @@ function Button({ children, variant = "", className = "", ...props }) {
   );
 }
 function App() {
+  const [preparationTopicId, setPreparationTopicId] = useState("");
   const [home, setHome] = useState(null),
     [health, setHealth] = useState(null),
     [view, setView] = useState("home"),
@@ -270,7 +273,11 @@ function App() {
       ) : view === "progress" ? (
         <Progress home={home} onOpen={history} onChoose={setSelected} />
       ) : view === "preparation" ? (
-        <PreparationPage home={home} onUpdated={refresh} />
+        <PreparationPage
+          home={home}
+          onUpdated={refresh}
+          initialTopicId={preparationTopicId}
+        />
       ) : (
         <main className="home-page">
           <div className="page-eyebrow">
@@ -514,6 +521,32 @@ function App() {
                 {selected.review.map((r) => r.knowledge).join(", ")}.
               </p>
             )}
+            {!!selected.dueReviews?.length && (
+              <p className="hint">
+                Zum Aufwärmen:{" "}
+                {selected.dueReviews
+                  .slice(0, 3)
+                  .map((r) => r.word)
+                  .join(", ")}
+                .
+              </p>
+            )}
+            {selected.preparedSteps > 0 && (
+              <p className="hint">
+                Unterrichtsplan mit {selected.preparedSteps} Schritten bereit.
+              </p>
+            )}
+            <button
+              className="button secondary"
+              disabled={busy}
+              onClick={() => {
+                setPreparationTopicId(selected.id);
+                setSelected(null);
+                setView("preparation");
+              }}
+            >
+              Unterrichtsplan ansehen & vorbereiten
+            </button>
             {error && (
               <p className="error-text" role="alert">
                 {error}
@@ -689,6 +722,12 @@ function Progress({ home, onOpen, onChoose }) {
                   </span>
                 ))}
               </div>
+            )}
+            {t.mastery.length > 0 && (
+              <details className="plan-evidence">
+                <summary>Auswählen, sprechen & nächste Wiederholung</summary>
+                <WordProgress items={t.mastery} />
+              </details>
             )}
           </section>
         ))}
@@ -1260,68 +1299,6 @@ function Classroom({ initial, initialStream, onConsumed, onFinish }) {
           </div>
         </aside>
       </main>
-    </div>
-  );
-}
-function BoardElement({ element: e }) {
-  const style = {
-    left: e.x + "%",
-    top: e.y + "%",
-    width: e.width + "%",
-    height: e.height + "%",
-    fontSize: `clamp(18px, ${e.fontSize / 15}vw, ${e.fontSize}px)`,
-    "--board-font-size": `${e.fontSize}px`,
-    color: e.color,
-  };
-  return (
-    <div
-      className={`board-element ${e.type} ${e.highlight ? "highlighted" : ""}`}
-      style={style}
-      data-element-id={e.id}
-    >
-      {e.type === "text" ? (
-        <>
-          <strong>{e.text}</strong>
-          {e.translation && <small>{e.translation}</small>}
-        </>
-      ) : e.type === "shape" ? (
-        <svg
-          viewBox="0 0 100 100"
-          preserveAspectRatio="xMidYMid meet"
-          aria-label={e.text || e.shape}
-        >
-          <g fill={e.color}>
-            {e.shape === "circle" ? (
-              <circle cx="50" cy="50" r="44" />
-            ) : e.shape === "triangle" ? (
-              <path d="M50 5 97 93H3Z" />
-            ) : e.shape === "star" ? (
-              <path d="m50 3 14 30 33 5-24 23 6 34-29-16-29 16 6-34L3 38l33-5Z" />
-            ) : (
-              <rect x="7" y="7" width="86" height="86" rx="10" />
-            )}
-          </g>
-        </svg>
-      ) : e.src ? (
-        <img src={e.src} alt={e.text || "Lernbild"} />
-      ) : (
-        <div className="image-placeholder">
-          {e.imageStatus === "loading" ? (
-            <LoaderCircle className="spin" />
-          ) : (
-            <BookOpen />
-          )}
-          <span>
-            {e.imageStatus === "failed"
-              ? "Wir lernen mit Wörtern weiter."
-              : e.imageStatus === "loading"
-                ? "GPT Image zeichnet dein Bild. Einen Moment, bitte …"
-                : e.missingEmoji
-                  ? "Kein passendes Emoji. Ein Bild wird für dich gezeichnet …"
-                  : e.text || "Ein Bild für dich"}
-          </span>
-        </div>
-      )}
     </div>
   );
 }

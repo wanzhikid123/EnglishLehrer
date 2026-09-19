@@ -128,7 +128,7 @@ test("version-one databases upgrade without losing lessons or learned words", (t
   );
   store.close();
   store = new Store(path);
-  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 3);
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 4);
   assert.equal(store.lesson(lesson.id).state.topicSnapshot.words.length, 7);
   assert.equal(store.results(lesson.id).taught[0].text, "Monday");
   assert.equal(store.home().topics.length, 7);

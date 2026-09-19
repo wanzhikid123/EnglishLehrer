@@ -9,8 +9,17 @@ import { DEFAULT_SPEECH_TEMPO } from "../shared/speech.js";
 import { emojiDirectory } from "./emoji.js";
 import { root } from "./config.js";
 import { transcriptionRouter } from "./transcription.js";
+import { LessonPlans, validatePlan } from "./lesson-plans.js";
+import { savePlanSchema } from "../shared/lesson-plan.js";
 
-export function createApp({ store, classroom, config, preparation, ai }) {
+export function createApp({
+  store,
+  classroom,
+  config,
+  preparation,
+  ai,
+  plans = new LessonPlans(store, ai, config),
+}) {
   const app = express();
   app.disable("x-powered-by");
   app.use((req, res, next) => {
@@ -65,7 +74,14 @@ export function createApp({ store, classroom, config, preparation, ai }) {
     }),
   );
   app.get("/api/home", (_req, res) => res.json(store.home()));
-  app.get("/api/preparation", (_req, res) => res.json(preparation.state()));
+  app.get("/api/preparation", (_req, res) =>
+    res.json({
+      ...preparation.state(),
+      busy:
+        Boolean(preparation.active) ||
+        [...plans.jobs.values()].some((j) => !j.done),
+    }),
+  );
   app.use("/api/preparation/transcribe", transcriptionRouter(ai));
   app.post("/api/preparation/chat", async (req, res) =>
     res.json(await preparation.chat(req.body)),
@@ -76,11 +92,33 @@ export function createApp({ store, classroom, config, preparation, ai }) {
   app.post("/api/topics/:id/delete", (req, res) =>
     res.json(preparation.deleteTopic(req.params.id, req.body)),
   );
+  app.get("/api/topics/:id/plan", (req, res) =>
+    res.json(plans.state(req.params.id)),
+  );
+  app.post("/api/topics/:id/plan/generate", async (req, res) =>
+    res.json(await plans.build(req.params.id, req.body)),
+  );
+  app.post("/api/topics/:id/plan/save", async (req, res) =>
+    res.json(await plans.build(req.params.id, req.body, true)),
+  );
+  app.post("/api/topics/:id/plan/preview", (req, res) => {
+    const topic = plans.topic(req.params.id);
+    const { plan } = savePlanSchema.parse(req.body);
+    const valid = validatePlan(plan, topic, store.priorTaught(topic.id, ""));
+    res.json({
+      previews: plans.previews(
+        { ...valid, materials: store.lessonPlan(topic.id)?.materials },
+        topic,
+      ),
+    });
+  });
   app.post("/api/lessons", (req, res) => {
     const data = z
       .object({ topicId: z.string(), eventId: eventIdSchema })
       .parse(req.body);
-    const lesson = store.create(data.topicId, data.eventId);
+    const lesson = store.create(data.topicId, data.eventId, () =>
+      plans.snapshot(data.topicId),
+    );
     res.status(201).json(store.publicLesson(lesson.id));
   });
   app.get("/api/lessons/:id", (req, res) =>
