@@ -12,7 +12,7 @@ export class OpenAIService {
   async request(path, body, signal, timeout = 60000) {
     if (!this.config.apiKey)
       throw new AppError(
-        "Der API-Schlüssel fehlt. Bitte openai_api_key als Windows-Umgebungsvariable setzen und das Programm neu starten.",
+        "Der API-Schlüssel fehlt. Bitte OPENAI_API_KEY als Windows-Umgebungsvariable setzen und das Programm neu starten.",
         503,
       );
     let response;

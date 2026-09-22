@@ -5,13 +5,13 @@ Windows 本地运行的儿童英语课堂。面向 8 岁、英语零基础的孩
 ## 一键启动
 
 1. 安装 **Node.js 24 LTS 或更新版本**。
-2. 使用已有 Windows 环境变量 **`openai_api_key`**，无需在网页输入密钥；Windows 上 `OPENAI_API_KEY` 同样可用。模型和声音可以在项目根目录的 **`.env`** 配置。
+2. 使用已有 Windows 环境变量 **`OPENAI_API_KEY`**，无需在网页输入密钥。模型和声音可以在项目根目录的 **`.env`** 配置。
 3. 双击 **`Start-EnglishLehrer.cmd`**。首次启动会安装依赖和构建界面，然后打开浏览器。
 4. 在 **http://127.0.0.1:3210** 选择主题，点击 **Mikrofon an & Stunde starten**，允许 Chrome 使用麦克风。
 
 启动入口会优先打开已安装的 Chrome；如果没有找到 Chrome，则使用默认浏览器，请在 Chrome 中访问上述地址。再次启动会复用现有本地服务。无需账号或登录。服务只监听本机 `127.0.0.1`。
 
-环境变量在 Windows“编辑账户的环境变量”中设置；密钥只在服务端读取，不打印、不落盘，也不会发送给浏览器。启动脚本会尝试从现有进程、Windows 用户、系统环境依次读取 `openai_api_key`。
+环境变量在 Windows“编辑账户的环境变量”中设置；密钥只在服务端读取，不打印、不落盘，也不会发送给浏览器。启动脚本会尝试从现有进程、Windows 用户、系统环境依次读取 `OPENAI_API_KEY`。
 
 ### 手动启动
 
@@ -43,7 +43,7 @@ npm.cmd start
 - 四种交替练习：跟读、听德语选英语、看图说英语、听德语说英语。口头题隐藏选择按钮和答案；跟读不计入独立掌握证据。
 - 桌面课堂 60% 白底教学白板 + 40% 对话区；窄屏按上下排列。
 - 课堂针对 FHD、150% 缩放适配：覆盖 1280×720 和扣除浏览器工具栏后的 1280×620 CSS 视口，常规教学、答题与控制按钮保留在首屏；长对话在右侧面板内滚动。
-- GPT-5.6 Terra 通过受约束工具更新白板、添加/替换/移动/突出/删除文字及图形、出题、评估回答和生成总结。
+- GPT-6 Luna 通过受约束工具更新白板、添加/替换/移动/突出/删除文字及图形、出题、评估回答和生成总结。
 - 支持后台在同一个白板工具调用中擦除旧内容并绘制新内容，保留已经保存的学习记录；跟读单词后也会触发下一步规划，不依赖当前是否显示选择题。
 - 白板更新为一次事务和一次界面快照；浏览器确认渲染后，后台才确认画面更新。
 - 同一题支持点击与语音回答、错误提示及重试；保留有效尝试、提示使用和不确定回答，拒绝迟到答案，合并短时间内同选项的点击/语音重复输入。
@@ -74,7 +74,7 @@ npm.cmd start
 
 ```dotenv
 ENGLISH_LIVE_MODEL=gpt-live-1
-ENGLISH_TEACHER_MODEL=gpt-5.6-terra
+ENGLISH_TEACHER_MODEL=gpt-6-luna
 ENGLISH_TEACHER_REASONING_EFFORT=low
 ENGLISH_TRANSCRIPTION_MODEL=gpt-transcribe
 ENGLISH_VOICE=marin
@@ -88,9 +88,9 @@ Thinking effort 通过 `ENGLISH_TEACHER_REASONING_EFFORT` 配置，默认保持�
 
 | 变量                               | 默认值                                    |
 | ---------------------------------- | ----------------------------------------- |
-| `openai_api_key`                   | 必需，已有的 OpenAI API 密钥              |
+| `OPENAI_API_KEY`                   | 必需，已有的 OpenAI API 密钥              |
 | `ENGLISH_LIVE_MODEL`               | `gpt-live-1`                              |
-| `ENGLISH_TEACHER_MODEL`            | `gpt-5.6-terra`                           |
+| `ENGLISH_TEACHER_MODEL`            | `gpt-6-luna`                              |
 | `ENGLISH_TEACHER_REASONING_EFFORT` | `low`，后台教学、备课、教案与课后总结共用 |
 | `ENGLISH_TRANSCRIPTION_MODEL`      | `gpt-transcribe`，备课语音输入            |
 | `ENGLISH_VOICE`                    | `marin`                                   |
@@ -118,7 +118,7 @@ Thinking effort 通过 `ENGLISH_TEACHER_REASONING_EFFORT` 配置，默认保持�
 npm.cmd test                     # 本地状态、数据一致性及字幕测试，不调用 API
 npm.cmd run build               # 构建检查
 npm.cmd run test:browser        # 本地浏览器流程测试，不调用 API
-npm.cmd run check:api           # 检查四个模型的账号访问权限
+npm.cmd run check:api           # 检查三个模型的账号访问权限
 node scripts/smoke-lesson-plans.js # 真实生成教案、口头答案判断、临时请求分流；内存测试库
 node scripts/smoke-live.js --prepared # 预备教案 + 真实 WebRTC + 合成 Monday 语音继续到 Tuesday
 node scripts/check-api.js --response  # 额外进行一次极短的真实教学模型调用
@@ -167,6 +167,6 @@ node scripts/smoke-transcription.js .cache/test-speech/question-transcription.we
 - [Live 会话、字幕和结束](https://developers.openai.com/api/docs/guides/live-conversations)
 - [Live 后台委托](https://developers.openai.com/api/docs/guides/live-delegation)
 - [Live 服务端控制](https://developers.openai.com/api/docs/guides/voice-server-controls?api=live)
-- [GPT-5.6 Terra](https://developers.openai.com/api/docs/models/gpt-5.6-terra)
+- [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna)
 
 Live 字幕只有带时间区间的增量片段，没有可靠的整句完成事件或精确逐字播放对齐。本实现保留时间片段、按说话人进行可修正分组，不展示后台生成的未来整段发言；插话后的精确字幕与播放对应仍受接口时序限制。

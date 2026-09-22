@@ -588,7 +588,7 @@ function App() {
             )}
             {health && !health.keyConfigured && (
               <p className="error-text">
-                Bitte zuerst die Windows-Umgebungsvariable openai_api_key
+                Bitte zuerst die Windows-Umgebungsvariable OPENAI_API_KEY
                 einrichten.
               </p>
             )}
@@ -640,7 +640,7 @@ function App() {
               <dd>
                 {health?.keyConfigured
                   ? "Aus der System-Umgebungsvariable geladen ✓"
-                  : "openai_api_key fehlt"}
+                  : "OPENAI_API_KEY fehlt"}
               </dd>
               <dt>Sprache</dt>
               <dd>{health?.models.live}</dd>

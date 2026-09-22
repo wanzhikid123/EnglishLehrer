@@ -23,10 +23,10 @@ export function loadConfig(env = process.env, directory = root) {
   return {
     port: Number(env.ENGLISH_PORT || 3210),
     dataDir: resolve(env.ENGLISH_DATA_DIR || resolve(directory, "data")),
-    // Windows environment names are case-insensitive; support the conventional spelling on other OSes.
-    apiKey: (env.openai_api_key || env.OPENAI_API_KEY || "").trim(),
+    // Prefer the conventional spelling while retaining existing lowercase installations.
+    apiKey: (env.OPENAI_API_KEY || env.openai_api_key || "").trim(),
     liveModel: setting("ENGLISH_LIVE_MODEL", "gpt-live-1"),
-    teacherModel: setting("ENGLISH_TEACHER_MODEL", "gpt-5.6-terra"),
+    teacherModel: setting("ENGLISH_TEACHER_MODEL", "gpt-6-luna"),
     teacherReasoningEffort,
     transcriptionModel: setting(
       "ENGLISH_TRANSCRIPTION_MODEL",

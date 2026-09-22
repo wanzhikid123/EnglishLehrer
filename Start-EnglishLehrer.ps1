@@ -6,10 +6,10 @@ $major = [int]((node --version).TrimStart('v').Split('.')[0])
 if ($major -lt 24) { throw 'EnglishLehrer requires Node.js 24 or newer.' }
 # Load the existing Windows variable when this shell was opened before it was configured.
 # Do not print, write, or pass the secret on a command line.
-if ([string]::IsNullOrWhiteSpace($env:openai_api_key)) {
-  $configuredKey = [Environment]::GetEnvironmentVariable('openai_api_key', 'User')
-  if ([string]::IsNullOrWhiteSpace($configuredKey)) { $configuredKey = [Environment]::GetEnvironmentVariable('openai_api_key', 'Machine') }
-  if (-not [string]::IsNullOrWhiteSpace($configuredKey)) { $env:openai_api_key = $configuredKey }
+if ([string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)) {
+  $configuredKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY', 'User')
+  if ([string]::IsNullOrWhiteSpace($configuredKey)) { $configuredKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY', 'Machine') }
+  if (-not [string]::IsNullOrWhiteSpace($configuredKey)) { $env:OPENAI_API_KEY = $configuredKey }
   $configuredKey = $null
 }
 $port = if ($env:ENGLISH_PORT) { [int]$env:ENGLISH_PORT } else { 3210 }
