@@ -70,7 +70,7 @@ npm.cmd start
 
 ## 可选配置
 
-模型和声音在项目根目录 `.env` 修改：
+可复制项目根目录的 `.env.example` 为 `.env`，再修改模型和声音。模板保存当前使用的非敏感配置；下方列出内置默认值：
 
 ```dotenv
 ENGLISH_LIVE_MODEL=gpt-live-1

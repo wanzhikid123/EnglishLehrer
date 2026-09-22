@@ -38,6 +38,7 @@ pnpm-debug.log*
 # Local configuration and secrets
 .env
 .env.*
+!.env.example
 .envrc
 .direnv/
 .secrets/
