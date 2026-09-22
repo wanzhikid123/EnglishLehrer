@@ -26,7 +26,8 @@ export function fakeMedia() {
     createAnalyser() {
       return {
         fftSize: 256,
-        getByteTimeDomainData: (samples) => samples.fill(128),
+        getByteTimeDomainData: (samples) =>
+          samples.fill(window.fixtureSpeaking ? 145 : 128),
       };
     }
   };

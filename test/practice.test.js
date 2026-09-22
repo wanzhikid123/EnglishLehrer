@@ -139,11 +139,20 @@ test("spoken questions reject clicks; uncertainty, wrong words and hinted retry 
   );
   assert.equal(store.results(id).attempts.length, 3);
 });
-test("a picture exercise cannot be scored while its image is missing", (t) => {
+test("legacy image exercises use German text and remain answerable", (t) => {
   const { store, id, q } = setup(t, "picture_speak");
   const lesson = store.lesson(id);
-  lesson.state.elements = [{ type: "image", imageStatus: "loading" }];
+  lesson.state.elements = [
+    {
+      type: "image",
+      text: "striped lunchbox",
+      translation: "Gestreifte Brotdose",
+      imageStatus: "loading",
+    },
+  ];
   store.saveState(id, lesson.state);
+  assert.equal(store.lesson(id).state.question.mode, "german_speak");
+  assert.equal(store.lesson(id).state.elements[0].text, "Gestreifte Brotdose");
   assert.equal(
     store.answer(id, {
       eventId: "early",
@@ -152,10 +161,10 @@ test("a picture exercise cannot be scored while its image is missing", (t) => {
       mode: "voice",
       uncertain: false,
       hinted: false,
-    }).ignored,
-    true,
+    }).outcome,
+    "correct",
   );
-  assert.equal(store.results(id).attempts.length, 0);
+  assert.equal(store.results(id).attempts.length, 1);
 });
 test("tempo changes are serialized, acknowledged and persisted without touching the board", async (t) => {
   const { store, id } = setup(t, "repeat");

@@ -29,7 +29,7 @@ test("parents generate, preview, reorder and persist an executable plan without 
   await expect(editor.locator(".plan-steps li").first()).toContainText("dog");
   await editor
     .getByRole("button", {
-      name: "Plan speichern & Bilder vorbereiten",
+      name: "Plan speichern",
       exact: true,
     })
     .click();
@@ -79,7 +79,7 @@ test("invalid reordering keeps the parent's draft and the last saved plan", asyn
     .click();
   await page
     .getByRole("button", {
-      name: "Plan speichern & Bilder vorbereiten",
+      name: "Plan speichern",
       exact: true,
     })
     .click();

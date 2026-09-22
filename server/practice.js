@@ -22,12 +22,19 @@ const colors = {
 
 export function practiceBoard(raw, topic) {
   const args = practiceToolSchema.parse(raw);
-  const { word, german, mode } = args;
+  const { word, german } = args;
   const color =
     topic.id === "colors" ||
     topic.words.every((item) => colors[item.toLowerCase()])
       ? colors[word.toLowerCase()]
       : null;
+  const mode =
+    args.mode === "picture_speak" &&
+    !color &&
+    !findEmoji(word) &&
+    !findEmoji(german)
+      ? "german_speak"
+      : args.mode;
   if (
     ![...topic.words, ...topic.phrases].some(
       (item) => item.toLowerCase() === word.toLowerCase(),
@@ -79,12 +86,13 @@ export function practiceBoard(raw, topic) {
       height,
     ),
     ...(color ? { color, shape: "circle" } : {}),
+    translation: german,
   });
   const elements =
     mode === "picture_speak"
       ? [picture(20, 3, 60, 90)]
       : mode === "repeat"
-        ? color || findEmoji(word)
+        ? color || findEmoji(word) || findEmoji(german)
           ? [
               picture(25, 0, 50, 58),
               {

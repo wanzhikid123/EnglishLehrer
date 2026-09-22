@@ -133,9 +133,14 @@ export function searchEmoji(query) {
 }
 export const emojiCount = assets.size;
 export function normalizeVisual(element, contextWord = "") {
-  if (!["shape", "emoji"].includes(element.type)) return element;
+  if (!["shape", "emoji", "image"].includes(element.type)) return element;
+  // Old saved image elements are also rendered through the local fallback.
+  const { src, emoji, imageStatus, missingEmoji, ...clean } = element;
+  element = clean;
   const subject =
-    element.text.trim() || element.translation.trim() || contextWord;
+    String(element.text || "").trim() ||
+    String(element.translation || "").trim() ||
+    contextWord;
   // Colored balls and real geometry remain precise SVG shapes.
   const basic =
     /^(?:(?:red|blue|green|yellow|purple|orange|pink|black|white|brown|grey|gray|rot|blau|grün|gelb|lila|rosa|schwarz|weiß|braun|grau)[ -]?)?(?:ball|circle|square|triangle|star|rectangle|kreis|quadrat|dreieck|stern|rechteck)?$/i;
@@ -156,10 +161,10 @@ export function normalizeVisual(element, contextWord = "") {
     };
   return {
     ...element,
-    text: element.text || subject,
-    type: "image",
+    text: String(element.translation || "").trim() || "Deutscher Begriff fehlt",
+    translation: "",
+    type: "text",
     shape: "none",
-    missingEmoji: true,
-    imageStatus: "pending",
+    textFallback: true,
   };
 }

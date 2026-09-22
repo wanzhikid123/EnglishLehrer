@@ -913,7 +913,7 @@ button svg {
   border-radius: 15px;
   overflow: hidden;
 }
-.history-list > button {
+.history-list .history-open {
   padding: 20px;
   display: flex;
   align-items: center;
@@ -923,6 +923,31 @@ button svg {
   border: 0;
   border-bottom: 1px solid var(--line);
   gap: 20px;
+}
+.history-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+.history-open {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+.history-delete {
+  flex: 0 0 44px;
+  border: 1px solid #ded7ca;
+  border-radius: 14px;
+  color: #a34136;
+  background: #fffaf3;
+}
+.history-delete:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.delete-results {
+  margin: 16px 0 0 12px;
+  color: #a34136;
 }
 .history-list strong {
   font-size: 13px;
@@ -1191,21 +1216,6 @@ button svg {
   outline: 3px dashed #e3bf60;
   outline-offset: 4px;
   border-radius: 10px;
-}
-.image-placeholder {
-  border: 2px dashed #dce4cd;
-  border-radius: 14px;
-  background: #f8faf2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  height: 100%;
-  width: 100%;
-  flex-direction: column;
-  padding: 10px;
-  font-size: 12px;
-  color: #9aa586;
 }
 .quiz {
   border-top: 1px solid #edf0e7;

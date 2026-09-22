@@ -11,7 +11,20 @@ const ai = new OpenAIService(config);
 const classroom = new Classroom(store, ai, config);
 const preparation = new Preparation(store, ai);
 const plans = new LessonPlans(store, ai, config);
-const app = createApp({ store, classroom, config, preparation, ai, plans });
+const app = createApp({
+  store,
+  classroom,
+  config,
+  preparation,
+  ai,
+  plans,
+  shutdown: () =>
+    stop()
+      .then(() => process.exit())
+      .catch(() => {
+        process.exitCode = 1;
+      }),
+});
 const server = app.listen(config.port, "127.0.0.1", () => {
   // Recover only after owning the port. A second launch must not interrupt the running instance.
   store.recoverPreparation();

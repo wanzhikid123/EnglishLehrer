@@ -1,6 +1,3 @@
-import { createHash } from "node:crypto";
-import { writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import WebSocket from "ws";
 import { AppError } from "./store.js";
 import {
@@ -11,7 +8,6 @@ import {
 export class OpenAIService {
   constructor(config) {
     this.config = config;
-    this.imageJobs = new Map();
   }
   async request(path, body, signal, timeout = 60000) {
     if (!this.config.apiKey)
@@ -101,7 +97,7 @@ export class OpenAIService {
         input,
         tools,
         parallel_tool_calls: false,
-        reasoning: { effort: "low" },
+        reasoning: { effort: this.config.teacherReasoningEffort || "low" },
         max_output_tokens: 5000,
         store: false,
       },
@@ -196,34 +192,5 @@ export class OpenAIService {
     } finally {
       connection?.close();
     }
-  }
-  async image(prompt, signal) {
-    const hash = createHash("sha256")
-      .update(this.config.imageModel + "\n" + prompt)
-      .digest("hex");
-    if (this.imageJobs.has(hash)) return this.imageJobs.get(hash);
-    const job = (async () => {
-      const result = await this.request(
-        "/images/generations",
-        {
-          model: this.config.imageModel,
-          prompt: `A clear, friendly educational illustration for an 8-year-old learning English. No written words or labels. White background. ${prompt}`,
-          size: "1024x1024",
-          quality: "low",
-          n: 1,
-        },
-        signal,
-        120000,
-      );
-      const b64 = result.data?.[0]?.b64_json;
-      if (!b64)
-        throw new AppError("Das Bild konnte nicht erstellt werden.", 502);
-      const folder = join(this.config.dataDir, "images");
-      await mkdir(folder, { recursive: true });
-      await writeFile(join(folder, hash + ".png"), Buffer.from(b64, "base64"));
-      return { hash, path: `/assets/teaching/${hash}.png` };
-    })().finally(() => this.imageJobs.delete(hash));
-    this.imageJobs.set(hash, job);
-    return job;
   }
 }

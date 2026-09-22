@@ -75,6 +75,46 @@ const answer = (overrides = {}) => ({
   hinted: false,
   ...overrides,
 });
+
+test("deleting one lesson removes its evidence and recomputes progress without touching other lessons or topics", (t) => {
+  const { store, id } = setup(t);
+  store.updateBoard(id, "deleted-board", board());
+  store.answer(id, answer());
+  store.finish(id, "ended_early");
+  const other = store.create("animals", "keep-lesson");
+  store.connect(other.id, "keep-remote");
+  store.updateBoard(other.id, "keep-board", {
+    ...board(),
+    question: null,
+    taught: [{ text: "cat", kind: "word" }],
+  });
+  store.finish(other.id, "interrupted");
+  assert.equal(store.home().stats.words, 2);
+  assert.equal(store.mastery("colors").length, 1);
+  store.deleteLesson(id);
+  assert.throws(() => store.lesson(id), { status: 404 });
+  assert.equal(store.home().stats.words, 1);
+  assert.equal(store.home().history.length, 1);
+  assert.deepEqual(store.mastery("colors"), []);
+  assert.deepEqual(store.reviewQueue("colors"), []);
+  assert.equal(store.results(other.id).taught[0].text, "cat");
+  assert.equal(store.topics().length, 7);
+  for (const table of ["attempts", "questions", "events", "taught"])
+    assert.equal(
+      store.db
+        .prepare(`SELECT COUNT(*) n FROM ${table} WHERE lesson_id=?`)
+        .get(id).n,
+      0,
+    );
+  assert.deepEqual(store.db.prepare("PRAGMA foreign_key_check").all(), []);
+});
+
+test("deleting an active lesson is rejected without losing evidence", (t) => {
+  const { store, id } = setup(t);
+  store.updateBoard(id, "active-board", board());
+  assert.throws(() => store.deleteLesson(id), { status: 409 });
+  assert.equal(store.results(id).taught.length, 1);
+});
 function setup(t) {
   let time = 100000;
   const store = new Store(":memory:", () => time);

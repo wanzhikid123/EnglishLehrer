@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { createServer, request } from "node:http";
 import { Store } from "../server/store.js";
 import { createApp } from "../server/app.js";
+import { Classroom } from "../server/classroom.js";
+import { root } from "../server/config.js";
 
 test("local HTTP API initializes history, enforces origins and never returns the long-lived key", async (t) => {
   const store = new Store(":memory:");
@@ -12,7 +14,6 @@ test("local HTTP API initializes history, enforces origins and never returns the
     dataDir: ".cache/test-data",
     liveModel: "live-test",
     teacherModel: "teacher-test",
-    imageModel: "image-test",
   };
   const tempoCalls = [];
   const app = createApp({
@@ -99,4 +100,82 @@ test("local HTTP API initializes history, enforces origins and never returns the
   });
   assert.equal(changed.status, 200);
   assert.deepEqual(tempoCalls, [{ id: lesson.id, tempo: 4 }]);
+});
+
+test("lesson deletion requires confirmation, rejects active lessons and leaves other data intact", async (t) => {
+  const store = new Store(":memory:");
+  const classroom = new Classroom(store, {}, {});
+  let stopped = 0;
+  const app = createApp({
+    store,
+    classroom,
+    config: { port: 3210 },
+    shutdown: () => stopped++,
+  });
+  const server = createServer(app);
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+    store.close();
+  });
+  const base = `http://127.0.0.1:${server.address().port}/api`;
+  const post = (path, body, origin) =>
+    fetch(base + path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(origin ? { Origin: origin } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+  const record = store.create("animals", "delete-http");
+  store.connect(record.id, "test");
+  assert.equal((await post(`/lessons/${record.id}/delete`, {})).status, 400);
+  assert.equal(
+    (await post(`/lessons/${record.id}/delete`, { confirmed: true })).status,
+    409,
+  );
+  store.finish(record.id, "ended_early");
+  assert.equal(
+    (
+      await post(
+        `/lessons/${record.id}/delete`,
+        { confirmed: true },
+        "https://evil.example",
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await post(`/lessons/${record.id}/delete`, { confirmed: true })).status,
+    200,
+  );
+  assert.equal((await fetch(base + `/lessons/${record.id}`)).status, 404);
+  assert.equal(
+    (await post(`/lessons/${record.id}/delete`, { confirmed: true })).status,
+    404,
+  );
+  assert.equal(store.home().history.length, 0);
+  assert.equal(
+    (await post("/shutdown", { directory: root + "/another-checkout" })).status,
+    409,
+  );
+  assert.equal(
+    (await post("/shutdown", { directory: root }, "https://evil.example"))
+      .status,
+    403,
+  );
+  assert.equal(stopped, 0);
+  assert.equal((await post("/shutdown", { directory: root })).status, 200);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(stopped, 1);
+  assert.equal(
+    (await post("/lessons", { topicId: "animals", eventId: "too-late" }))
+      .status,
+    503,
+  );
+  assert.equal((await post("/shutdown", { directory: root })).status, 200);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(stopped, 1);
 });

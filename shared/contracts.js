@@ -7,7 +7,7 @@ const id = z
 const text = z.string().max(500);
 export const elementSchema = z.object({
   id,
-  type: z.enum(["text", "shape", "image", "emoji"]),
+  type: z.enum(["text", "shape", "emoji"]),
   text,
   translation: text,
   shape: z.enum(["circle", "square", "triangle", "star", "none"]),
@@ -81,12 +81,6 @@ export const answerSchema = z.object({
 export const voiceAnswerSchema = answerSchema.omit({
   eventId: true,
   mode: true,
-});
-export const imageToolSchema = z.object({
-  expectedRevision: z.number().int().min(0),
-  stepId: id,
-  elementId: id,
-  prompt: z.string().min(5).max(800),
 });
 export const hintToolSchema = z.object({ questionId: id });
 export const endToolSchema = z.object({

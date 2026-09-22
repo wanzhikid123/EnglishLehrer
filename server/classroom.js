@@ -1,10 +1,9 @@
 import { randomUUID, createHash } from "node:crypto";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { AppError } from "./store.js";
 import { searchEmoji } from "./emoji.js";
 import { practiceBoard, isSpokenPractice } from "./practice.js";
 import { PreparedLesson } from "./prepared-lesson.js";
+import { isGoodbye } from "../shared/goodbye.js";
 import {
   DEFAULT_SPEECH_TEMPO,
   speechTempoInstruction,
@@ -17,7 +16,6 @@ import {
 } from "./teacher.js";
 import {
   voiceAnswerSchema,
-  imageToolSchema,
   hintToolSchema,
   endToolSchema,
   speechTempoSchema,
@@ -92,6 +90,9 @@ export class Classroom {
       room.seen.clear();
       room.transcripts = [];
       room.inputSpan = null;
+      room.farewellSpan = null;
+      room.lastSpeaker = null;
+      this.cancelGoodbye(id);
       room.plannedInput = null;
       room.inputVersion++;
       room.preparedNext = null;
@@ -263,8 +264,10 @@ export class Classroom {
       if (event.event_id && room.seen.has(event.event_id)) return;
       if (event.event_id) room.seen.add(event.event_id);
       const isChild = event.type === "session.input_transcript.delta";
+      const pendingGoodbye = room.goodbyeToken;
       const q = this.store.lesson(id).state.question;
       if (isChild) {
+        this.cancelGoodbye(id);
         room.inputVersion++;
         if (!room.inputSpan || event.start_ms - room.inputSpan.end > 1500) {
           room.inputSpan = {
@@ -289,7 +292,36 @@ export class Classroom {
             ? q.id
             : null,
       });
-      if (isChild) this.checkAnswerCandidate(id, q);
+      if (isChild) {
+        const start = Number(event.start_ms) || 0;
+        const end = Number(event.end_ms) || start;
+        if (
+          !room.farewellSpan ||
+          room.lastSpeaker === "teacher" ||
+          start - room.farewellSpan.end > 1500
+        )
+          room.farewellSpan = { end, parts: new Map() };
+        room.farewellSpan.end = end;
+        room.farewellSpan.parts.set(start, String(event.delta || ""));
+        const heard = [...room.farewellSpan.parts.entries()]
+          .sort(([a], [b]) => a - b)
+          .map(([, text]) => text)
+          .join("");
+        const word = (text) =>
+          String(text || "")
+            .toLowerCase()
+            .replace(/[^\p{L}]/gu, "");
+        const practicingFarewell =
+          q?.status === "open" &&
+          isSpokenPractice(q) &&
+          word(heard) === word(q.knowledge);
+        if (isGoodbye(heard) && !practicingFarewell) this.scheduleGoodbye(id);
+        else {
+          if (pendingGoodbye) this.cancelFinish(id);
+          this.checkAnswerCandidate(id, q);
+        }
+      }
+      room.lastSpeaker = isChild ? "child" : "teacher";
       if (room.transcripts.length > 180) room.transcripts.splice(0, 60);
       if (room.seen.size > 4000) room.seen.clear();
     }
@@ -372,10 +404,72 @@ export class Classroom {
       isAnswer || isRequest ? 1700 : repeatedWord ? 2200 : 3500,
     );
   }
+  scheduleGoodbye(id) {
+    const room = this.room(id);
+    if (!room.ready || room.closing) return;
+    clearTimeout(room.answerCheckTimer);
+    const token = randomUUID();
+    room.goodbyeToken = token;
+    this.emit(id, "goodbye", { token });
+    room.goodbyeTimer = setTimeout(() => {
+      if (room.goodbyeToken !== token || room.closing || !room.ready) return;
+      const lesson = this.store.lesson(id);
+      this.end(
+        id,
+        lesson.state.readyToFinish ? lesson.state.finishReason : "ended_early",
+      ).catch(() => {});
+    }, 3000);
+  }
+  cancelGoodbye(id, token) {
+    const room = this.room(id);
+    if (token && token !== room.goodbyeToken) return;
+    clearTimeout(room.goodbyeTimer);
+    if (room.goodbyeToken) this.emit(id, "goodbye", { token: null });
+    room.goodbyeToken = null;
+  }
+  inputActivity(id, token) {
+    const room = this.room(id);
+    if (!token || !room.ready || room.closing || token !== room.goodbyeToken)
+      return;
+    this.cancelGoodbye(id, token);
+    // A new utterance must not be appended to the already recognized farewell.
+    room.inputSpan = null;
+    room.farewellSpan = null;
+    room.inputVersion++;
+    this.cancelFinish(id);
+  }
+  cancelFinish(id) {
+    const lesson = this.store.lesson(id);
+    if (lesson.state.readyToFinish) {
+      lesson.state.readyToFinish = false;
+      lesson.state.finishDelivered = false;
+      this.store.saveState(id, lesson.state);
+      this.publish(id);
+    }
+  }
+  async deleteResults(id) {
+    const room = this.rooms.get(id);
+    if (this.store.lesson(id).status === "active" || room?.connecting)
+      throw new AppError("Bitte die laufende Stunde zuerst beenden.", 409);
+    // Wait for summary writes before deleting their referenced lesson.
+    if (room?.ending) await room.ending;
+    if (room?.queue) await room.queue.catch(() => {});
+    if (room?.connecting)
+      throw new AppError("Die Stunde wird gerade verbunden.", 409);
+    const result = this.store.deleteLesson(id);
+    if (room) {
+      this.cancelGoodbye(id);
+      this.rooms.delete(id);
+    }
+    this.emit(id, "deleted", { id });
+    for (const client of this.clients.get(id) || []) client.end();
+    this.clients.delete(id);
+    return result;
+  }
   enqueue(id, trigger, delegationId = null, confirmedAnswer = null) {
     const room = this.room(id);
     const signal = room.controller.signal;
-    if (room.busy >= 6 || room.closing) return;
+    if (room.busy >= 6 || room.closing || room.goodbyeToken) return;
     if (room.inputSpan)
       room.plannedInput = {
         start: room.inputSpan.start,
@@ -517,24 +611,7 @@ export class Classroom {
       this.publish(id);
       await this.waitRendered(id, result.revision, signal);
       const state = this.store.lesson(id).state;
-      const images = [];
-      for (const element of state.elements.filter(
-        (e) => e.missingEmoji && e.imageStatus === "pending",
-      )) {
-        images.push(
-          await this.generateImage(
-            id,
-            {
-              expectedRevision: state.revision,
-              stepId: state.stepId,
-              elementId: element.id,
-              prompt: `One clear child-friendly illustration of ${element.text || element.translation}. Plain white background. Large recognizable object. No text, letters, labels or symbols.`,
-            },
-            signal,
-          ),
-        );
-      }
-      return { ...result, visible: true, question: state.question, images };
+      return { ...result, visible: true, question: state.question };
     }
     if (name === "record_answer") {
       const answer = voiceAnswerSchema.parse(args);
@@ -562,8 +639,6 @@ export class Classroom {
       result = this.store.hint(id, hintToolSchema.parse(args).questionId);
     else if (name === "finish_lesson")
       result = this.store.requestFinish(id, endToolSchema.parse(args).reason);
-    else if (name === "generate_image")
-      return this.generateImage(id, imageToolSchema.parse(args), signal);
     else throw new AppError("Unbekanntes Unterrichtswerkzeug.");
     this.publish(id);
     return result;
@@ -605,104 +680,9 @@ export class Classroom {
       }
     });
   }
-  async generateImage(id, args, signal) {
-    const lesson = this.store.active(id);
-    const element = lesson.state.elements.find(
-      (e) => e.id === args.elementId && e.type === "image",
-    );
-    if (
-      lesson.state.revision !== args.expectedRevision ||
-      lesson.state.stepId !== args.stepId ||
-      !element
-    )
-      throw new AppError("Dieser Bildplatzhalter ist nicht mehr aktuell.", 409);
-    if (element.imageStatus === "loading" || element.src)
-      return { ok: true, status: element.imageStatus || "ready" };
-    const hash = createHash("sha256")
-      .update(this.config.imageModel + "\n" + args.prompt)
-      .digest("hex");
-    const cached = this.store.db
-      .prepare("SELECT * FROM images WHERE hash=?")
-      .get(hash);
-    if (
-      cached &&
-      existsSync(join(this.config.dataDir, "images", hash + ".png"))
-    ) {
-      element.src = cached.path;
-      element.imageStatus = "ready";
-      this.store.saveState(id, lesson.state);
-      this.publish(id);
-      return { ok: true, status: "ready" };
-    }
-    element.imageStatus = "loading";
-    this.store.saveState(id, lesson.state);
-    this.publish(id);
-    this.ai
-      .image(args.prompt, signal)
-      .then((result) => {
-        this.store.db
-          .prepare("INSERT OR IGNORE INTO images VALUES(?,?,?,?,?)")
-          .run(
-            result.hash,
-            result.path,
-            lesson.topic_id,
-            element.text,
-            Date.now(),
-          );
-        if (signal.aborted) return;
-        const current = this.store.lesson(id);
-        if (
-          current.status !== "active" ||
-          current.state.stepId !== args.stepId ||
-          current.state.revision !== args.expectedRevision
-        )
-          return;
-        const target = current.state.elements.find(
-          (e) => e.id === args.elementId,
-        );
-        if (!target) return;
-        target.src = result.path;
-        target.imageStatus = "ready";
-        this.store.saveState(id, current.state);
-        this.publish(id);
-        if (this.room(id).ready)
-          this.send(
-            id,
-            "session.commentary.append",
-            `Das Bild ist jetzt auf der aktuellen Tafel bereit. ${current.state.question?.mode === "picture_speak" ? "Frage jetzt: Was siehst du? Sag das englische Wort. Verrate die Lösung nicht." : "Fahre kurz mit der aktuellen Aufgabe fort, ohne eine neue Aufgabe zu erfinden."}`,
-          ).catch(() => {});
-      })
-      .catch(() => {
-        if (signal.aborted) return;
-        const current = this.store.lesson(id);
-        if (current.state.revision !== args.expectedRevision) return;
-        const target = current.state.elements.find(
-          (e) => e.id === args.elementId,
-        );
-        if (target) {
-          target.imageStatus = "failed";
-          this.store.saveState(id, current.state);
-          this.publish(id);
-        }
-        this.emit(id, "notice", {
-          message:
-            "Das Bild konnte nicht geladen werden. Wir können mündlich weiterüben.",
-        });
-        if (this.room(id).ready)
-          this.send(
-            id,
-            "session.commentary.append",
-            "Das aktuelle Bild konnte nicht erstellt werden. Keine Frage zu einem unsichtbaren Bild stellen. Erkläre es kurz und lass den Planer eine mündliche Ersatzübung anbieten.",
-          ).catch(() => {});
-      });
-    return {
-      ok: true,
-      status: "loading",
-      message:
-        "Kein passendes Emoji: GPT Image zeichnet das Bild. Bitte dem Kind kurz sagen, dass es einen Moment dauert. Eine Bildfrage erst stellen, wenn das Bild bereit ist; bis dahin kurz mündlich wiederholen.",
-    };
-  }
   click(id, data) {
+    const room = this.room(id);
+    this.inputActivity(id, room.goodbyeToken);
     const result = this.store.answer(id, data);
     this.publish(id);
     if (result.ok && !result.duplicate)
@@ -741,6 +721,7 @@ export class Classroom {
     const lesson = this.store.finish(id, status);
     room.closing = true;
     room.ready = false;
+    this.cancelGoodbye(id);
     clearTimeout(room.answerCheckTimer);
     room.controller.abort();
     for (const p of room.pending.values())

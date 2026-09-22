@@ -166,9 +166,6 @@ export function LessonPlanEditor({
   }
   const step = draft?.steps[index];
   const board = previews[index];
-  const failures = Object.values(state?.plan?.materials || {}).filter(
-    (m) => m.status === "failed",
-  ).length;
   return (
     <section
       className="lesson-plan-editor"
@@ -189,16 +186,14 @@ export function LessonPlanEditor({
         </button>
       </div>
       <p>
-        Übungen und Bilder vor der Stunde vorbereiten. Mia wartet bei jeder
-        Aufgabe auf die Antwort und passt sich Wünschen an. Änderungen gelten
-        für neue Stunden.
+        Übungen mit Emoji oder deutschen Begriffen vorbereiten. Mia wartet bei
+        jeder Aufgabe auf die Antwort und passt sich Wünschen an. Änderungen
+        gelten für neue Stunden.
       </p>
       {(busy || state?.job?.busy) && (
         <p className="plan-status" role="status">
           <LoaderCircle className="spin" size={18} />
-          {state?.job?.phase === "materials"
-            ? `Bilder werden vorbereitet · ${state.job.completed} / ${state.job.total}`
-            : "Unterrichtsplan wird erstellt …"}
+          Unterrichtsplan wird erstellt …
         </p>
       )}
       {error && (
@@ -215,12 +210,6 @@ export function LessonPlanEditor({
         <p className="hint">
           Das Thema wurde geändert. Bitte den Plan neu erstellen; neue Stunden
           nutzen den alten Plan nicht.
-        </p>
-      )}
-      {!!failures && (
-        <p className="hint">
-          {failures} Bild(er) fehlen. Diese Aufgaben verwenden vorerst Deutsch →
-          Englisch. Mit „Plan speichern & Bilder vorbereiten“ erneut versuchen.
         </p>
       )}
       {state?.reviews.length > 0 && (
@@ -384,7 +373,7 @@ export function LessonPlanEditor({
                       )}
                       {board.mode !== step.mode && (
                         <p className="hint">
-                          Bis das Bild bereit ist: mündliche Ersatzübung.
+                          Kein passendes Emoji: mit dem deutschen Begriff üben.
                         </p>
                       )}
                     </div>
@@ -411,7 +400,7 @@ export function LessonPlanEditor({
               onClick={() => build(true)}
             >
               <Save size={17} />
-              Plan speichern & Bilder vorbereiten
+              Plan speichern
             </button>
             <span>
               {dirty

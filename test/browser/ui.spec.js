@@ -302,8 +302,8 @@ test("topic card deletion can be cancelled and preserves past lessons after conf
     "Die Welt ist bunt",
   );
   await page
-    .locator(".history-list")
-    .getByRole("button", { name: /Die Welt ist bunt/ })
+    .locator(".history-list .history-open")
+    .filter({ hasText: "Die Welt ist bunt" })
     .click();
   await expect(
     page.getByRole("heading", { name: "Deine Entdeckungen sind gespeichert." }),

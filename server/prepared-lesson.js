@@ -78,18 +78,6 @@ export class PreparedLesson {
     current.state.planCursor = cursor + 1;
     current.state.preparedQuestionId = board.question.id;
     current.state.phase = step.stage;
-    // src is deliberately excluded from the model's board schema. Only trusted,
-    // prevalidated local materials from the lesson snapshot can supply it here.
-    const material = l.state.planSnapshot.materials?.[knowledgeKey(step.word)];
-    if (material?.status === "ready")
-      for (const e of current.state.elements) {
-        if (e.type === "image")
-          Object.assign(e, {
-            src: material.src,
-            imageStatus: "ready",
-            missingEmoji: false,
-          });
-      }
     this.store.saveState(id, current.state);
     this.classroom.publish(id);
     this.warm(id);

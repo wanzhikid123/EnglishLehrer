@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { Store } from "../server/store.js";
 import { Classroom } from "../server/classroom.js";
 import {
@@ -38,7 +38,7 @@ function setup(t, ai = {}) {
   let now = 1_800_000_000_000;
   const dir = mkdtempSync(join(tmpdir(), "english-plans-"));
   const store = new Store(":memory:", () => now);
-  const config = { dataDir: dir, imageModel: "test" };
+  const config = { dataDir: dir };
   const plans = new LessonPlans(store, ai, config);
   t.after(async () => {
     await plans.shutdown();
@@ -239,23 +239,8 @@ test("failed generation preserves the saved plan, and topic changes invalidate n
   assert.equal(store.publicLesson(l.id).state.planSnapshot, undefined);
 });
 
-test("materials prepare once, reuse disk cache, and failed images have a spoken fallback", async (t) => {
-  let calls = 0;
-  let config;
-  const ai = {
-    image: async (prompt) => {
-      calls++;
-      const hash = createHash("sha256")
-        .update("test\n" + prompt)
-        .digest("hex");
-      mkdirSync(join(config.dataDir, "images"), { recursive: true });
-      writeFileSync(join(config.dataDir, "images", hash + ".png"), "fixture");
-      return { hash, path: `/assets/teaching/${hash}.png` };
-    },
-  };
-  const env = setup(t, ai);
-  config = env.config;
-  const { store, plans } = env;
+test("plans use German text immediately when no suitable emoji exists", async (t) => {
+  const { store, plans } = setup(t, {});
   const topic = store.topic("animals");
   topic.words = ["striped lunchbox"];
   store.db
@@ -264,21 +249,26 @@ test("materials prepare once, reuse disk cache, and failed images have a spoken 
   const plan = {
     goal: "Eine Brotdose benennen.",
     steps: [
-      step("new", "striped lunchbox"),
-      step("picture", "striped lunchbox", "picture_speak"),
+      step("new", "striped lunchbox", "repeat", {
+        german: "Gestreifte Brotdose",
+      }),
+      step("picture", "striped lunchbox", "picture_speak", {
+        german: "Gestreifte Brotdose",
+      }),
     ],
   };
   await plans.build("animals", { ...request(store), plan }, true);
-  await plans.build("animals", { ...request(store), plan }, true);
-  assert.equal(calls, 1);
-  assert.equal(plans.state("animals").previews[1].mode, "picture_speak");
-  const material = store.lessonPlan("animals").materials["striped lunchbox"];
-  rmSync(join(config.dataDir, "images", material.src.split("/").at(-1)));
-  ai.image = async () => {
-    throw new Error("image unavailable");
-  };
-  await plans.build("animals", { ...request(store), plan }, true);
-  assert.equal(plans.state("animals").previews[1].mode, "german_speak");
+  const preview = plans.state("animals").previews[1];
+  assert.equal(preview.mode, "german_speak");
+  assert.equal(preview.elements[0].text, "Gestreifte Brotdose");
+  assert.deepEqual(store.lessonPlan("animals").materials, {});
+  // Old cached image references cannot re-enable removed generation/display.
+  assert.equal(
+    planBoard(plan.steps[1], topic, {
+      "striped lunchbox": { status: "ready", src: "/assets/teaching/old.png" },
+    }).question.mode,
+    "german_speak",
+  );
 });
 
 test("new lessons refresh due warmup without mutating the saved parent plan", async (t) => {
@@ -493,7 +483,7 @@ test("plan snapshots and current question survive restart and are not replaced b
   const dir = mkdtempSync(join(tmpdir(), "english-plan-restart-"));
   const path = join(dir, "learning.sqlite");
   let store = new Store(path);
-  const config = { dataDir: dir, imageModel: "test" };
+  const config = { dataDir: dir };
   t.after(() => {
     store.close();
     rmSync(dir, { recursive: true, force: true });

@@ -1,5 +1,5 @@
 import express from "express";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { z } from "zod";
 import { AppError } from "./store.js";
@@ -19,8 +19,10 @@ export function createApp({
   preparation,
   ai,
   plans = new LessonPlans(store, ai, config),
+  shutdown,
 }) {
   const app = express();
+  let shuttingDown = false;
   app.disable("x-powered-by");
   app.use((req, res, next) => {
     const hostname = req.hostname;
@@ -54,6 +56,10 @@ export function createApp({
       "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; media-src 'self' blob:; frame-ancestors 'none'",
     );
     if (req.path.startsWith("/api")) res.set("Cache-Control", "no-store");
+    if (shuttingDown && req.method !== "GET" && req.path !== "/api/shutdown")
+      return res
+        .status(503)
+        .json({ error: "EnglishLehrer wird gerade beendet." });
     next();
   });
   app.use(
@@ -67,13 +73,32 @@ export function createApp({
       models: {
         live: config.liveModel,
         teacher: config.teacherModel,
-        image: config.imageModel,
         transcription: config.transcriptionModel,
       },
       voice: config.voice,
+      teacherReasoningEffort: config.teacherReasoningEffort || "low",
     }),
   );
   app.get("/api/home", (_req, res) => res.json(store.home()));
+  app.post("/api/shutdown", (req, res) => {
+    const { directory } = z
+      .object({ directory: z.string().min(1).max(2000) })
+      .parse(req.body);
+    const normalize = (value) =>
+      process.platform === "win32"
+        ? resolve(value).toLowerCase()
+        : resolve(value);
+    if (normalize(directory) !== normalize(root) || !shutdown)
+      throw new AppError(
+        "Der Dienst gehört zu einem anderen Ordner oder kann hier nicht beendet werden.",
+        409,
+      );
+    res.json({ ok: true });
+    if (!shuttingDown) {
+      shuttingDown = true;
+      setImmediate(shutdown);
+    }
+  });
   app.get("/api/preparation", (_req, res) =>
     res.json({
       ...preparation.state(),
@@ -124,6 +149,15 @@ export function createApp({
   app.get("/api/lessons/:id", (req, res) =>
     res.json(store.publicLesson(req.params.id)),
   );
+  app.post("/api/lessons/:id/delete", async (req, res) => {
+    z.object({ confirmed: z.literal(true) }).parse(req.body);
+    res.json(await classroom.deleteResults(req.params.id));
+  });
+  app.post("/api/lessons/:id/input-activity", (req, res) => {
+    const { token } = z.object({ token: z.string().uuid() }).parse(req.body);
+    classroom.inputActivity(req.params.id, token);
+    res.json({ ok: true });
+  });
   app.get("/api/lessons/:id/events", (req, res) => {
     store.lesson(req.params.id);
     res.set({ "Content-Type": "text/event-stream", Connection: "keep-alive" });
@@ -203,14 +237,6 @@ export function createApp({
       maxAge: "1y",
       immutable: true,
       fallthrough: false,
-    }),
-  );
-  app.use(
-    "/assets/teaching",
-    express.static(join(config.dataDir, "images"), {
-      index: false,
-      immutable: true,
-      maxAge: "1y",
     }),
   );
   if (existsSync(join(root, "dist")))

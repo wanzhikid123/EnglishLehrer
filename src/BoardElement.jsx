@@ -1,5 +1,4 @@
 import React from "react";
-import { BookOpen, LoaderCircle } from "lucide-react";
 
 export function BoardElement({ element: e }) {
   const style = {
@@ -40,25 +39,10 @@ export function BoardElement({ element: e }) {
             )}
           </g>
         </svg>
-      ) : e.src ? (
+      ) : e.type === "emoji" && e.src?.startsWith("/assets/emoji/") ? (
         <img src={e.src} alt={e.text || "Lernbild"} />
       ) : (
-        <div className="image-placeholder">
-          {e.imageStatus === "loading" ? (
-            <LoaderCircle className="spin" />
-          ) : (
-            <BookOpen />
-          )}
-          <span>
-            {e.imageStatus === "failed"
-              ? "Wir lernen mit Wörtern weiter."
-              : e.imageStatus === "loading"
-                ? "GPT Image zeichnet dein Bild. Einen Moment, bitte …"
-                : e.missingEmoji
-                  ? "Kein passendes Emoji. Ein Bild wird für dich gezeichnet …"
-                  : e.text || "Ein Bild für dich"}
-          </span>
-        </div>
+        <strong>{e.translation || "Deutscher Begriff fehlt"}</strong>
       )}
     </div>
   );

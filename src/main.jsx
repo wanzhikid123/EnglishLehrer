@@ -181,6 +181,29 @@ function App() {
       setError(e.message);
     }
   }
+  async function deleteResults(record) {
+    if (
+      deleting ||
+      !window.confirm(
+        `Lernergebnisse dieser Stunde wirklich löschen?\n${record.topic?.name || record.topic_name || record.topic_id} · ${dateText(record.started_at)}\n\nWörter, Antworten und Zusammenfassung dieser Stunde werden gelöscht. Lernstand und Wiederholungen werden neu berechnet.`,
+      )
+    )
+      return;
+    setDeleting(true);
+    setError("");
+    try {
+      await lessonApi(record.id, "/delete", { confirmed: true });
+      if (lesson?.id === record.id) {
+        setLesson(null);
+        setView("progress");
+      }
+      await refresh();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setDeleting(false);
+    }
+  }
   const back = () => {
     setView("home");
     setLesson(null);
@@ -269,9 +292,20 @@ function App() {
           …
         </main>
       ) : view === "summary" && lesson ? (
-        <Summary lesson={lesson} onBack={back} />
+        <Summary
+          lesson={lesson}
+          onBack={back}
+          onDelete={deleteResults}
+          deleting={deleting}
+        />
       ) : view === "progress" ? (
-        <Progress home={home} onOpen={history} onChoose={setSelected} />
+        <Progress
+          home={home}
+          onOpen={history}
+          onChoose={setSelected}
+          onDelete={deleteResults}
+          deleting={deleting}
+        />
       ) : view === "preparation" ? (
         <PreparationPage
           home={home}
@@ -612,8 +646,8 @@ function App() {
               <dd>{health?.models.live}</dd>
               <dt>Unterrichtsplanung</dt>
               <dd>{health?.models.teacher}</dd>
-              <dt>Illustrationen</dt>
-              <dd>{health?.models.image}</dd>
+              <dt>Thinking effort</dt>
+              <dd>{health?.teacherReasoningEffort}</dd>
               <dt>Spracheingabe</dt>
               <dd>{health?.models.transcription}</dd>
             </dl>
@@ -673,7 +707,7 @@ function TopicCard({ topic: t, onClick, onDelete, deleting }) {
     </div>
   );
 }
-function Progress({ home, onOpen, onChoose }) {
+function Progress({ home, onOpen, onChoose, onDelete, deleting }) {
   return (
     <main className="progress-page">
       <span className="eyebrow">KLEINE SCHRITTE SICHTBAR MACHEN</span>
@@ -740,22 +774,37 @@ function Progress({ home, onOpen, onChoose }) {
       ) : (
         <div className="history-list">
           {home.history.map((l) => (
-            <button key={l.id} onClick={() => onOpen(l.id)}>
-              <span>
-                <strong>
-                  {l.topic_name ||
-                    home.topics.find((t) => t.id === l.topic_id)?.name ||
-                    l.topic_id}
-                </strong>
-                <small>
-                  {dateText(l.started_at)} · {clockText(l.duration_ms)}
-                </small>
-              </span>
-              <span className={`status-pill ${l.status}`}>
-                {statusText[l.status]}
-              </span>
-              <ChevronRight size={18} />
-            </button>
+            <div className="history-row" key={l.id}>
+              <button className="history-open" onClick={() => onOpen(l.id)}>
+                <span>
+                  <strong>
+                    {l.topic_name ||
+                      home.topics.find((t) => t.id === l.topic_id)?.name ||
+                      l.topic_id}
+                  </strong>
+                  <small>
+                    {dateText(l.started_at)} · {clockText(l.duration_ms)}
+                  </small>
+                </span>
+                <span className={`status-pill ${l.status}`}>
+                  {statusText[l.status]}
+                </span>
+                <ChevronRight size={18} />
+              </button>
+              <button
+                className="history-delete"
+                disabled={deleting || l.status === "active"}
+                aria-label={`Lernergebnisse löschen: ${l.topic_name || l.topic_id} · ${dateText(l.started_at)}`}
+                title={
+                  l.status === "active"
+                    ? "Bitte die Stunde zuerst beenden"
+                    : "Lernergebnisse löschen"
+                }
+                onClick={() => onDelete(l)}
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
           ))}
         </div>
       )}
@@ -782,6 +831,7 @@ function Classroom({ initial, initialStream, onConsumed, onFinish }) {
     mounted = useRef(true),
     closing = useRef(false),
     autoFinish = useRef(null),
+    goodbyeToken = useRef(null),
     starting = useRef(false),
     initialUse = useRef(false),
     timeBase = useRef({ ms: initial.duration_ms, at: Date.now() });
@@ -806,6 +856,13 @@ function Classroom({ initial, initialStream, onConsumed, onFinish }) {
         return;
       }
       const session = new LiveConnection(id, mic, {
+        onInputActivity: () => {
+          const token = goodbyeToken.current;
+          if (token) {
+            goodbyeToken.current = null;
+            lessonApi(id, "/input-activity", { token }).catch(() => {});
+          }
+        },
         onTranscript: (e) => {
           if (mounted.current) setRows((r) => mergeTranscript(r, e));
         },
@@ -846,6 +903,12 @@ function Classroom({ initial, initialStream, onConsumed, onFinish }) {
       setLesson(l);
       timeBase.current = { ms: l.duration_ms, at: Date.now() };
       setElapsed(l.duration_ms);
+      if (["completed", "ended_early"].includes(l.status) && !closing.current) {
+        closing.current = true;
+        release();
+        setStatus("disconnected");
+        onFinish(l);
+      }
       if (l.status === "interrupted" && statusRef.current === "connected") {
         release();
         setStatus("disconnected");
@@ -854,6 +917,13 @@ function Classroom({ initial, initialStream, onConsumed, onFinish }) {
           "Die Stunde wurde unterbrochen. Deine Ergebnisse sind gespeichert.",
         );
       }
+    });
+    events.addEventListener("goodbye", (e) => {
+      goodbyeToken.current = JSON.parse(e.data).token;
+    });
+    events.addEventListener("deleted", () => {
+      release();
+      window.location.reload();
     });
     events.addEventListener("notice", (e) =>
       setNotice(JSON.parse(e.data).message),
@@ -1112,16 +1182,9 @@ function Classroom({ initial, initialStream, onConsumed, onFinish }) {
                     <span>
                       {q.status === "answered"
                         ? "Gut gemacht!"
-                        : lesson.state.elements.some(
-                              (e) =>
-                                e.type === "image" &&
-                                !e.src &&
-                                e.imageStatus !== "failed",
-                            )
-                          ? "Dein Bild entsteht. Einen Moment, bitte …"
-                          : q.mode === "repeat"
-                            ? "Hör Mia zu. Dann bist du dran."
-                            : "Du bist dran. Sag das englische Wort."}
+                        : q.mode === "repeat"
+                          ? "Hör Mia zu. Dann bist du dran."
+                          : "Du bist dran. Sag das englische Wort."}
                     </span>
                   </div>
                 ) : (
@@ -1302,7 +1365,7 @@ function Classroom({ initial, initialStream, onConsumed, onFinish }) {
     </div>
   );
 }
-function Summary({ lesson: initial, onBack }) {
+function Summary({ lesson: initial, onBack, onDelete, deleting }) {
   const [lesson, setLesson] = useState(initial);
   useEffect(() => {
     if (
@@ -1433,6 +1496,15 @@ function Summary({ lesson: initial, onBack }) {
       )}
       <Button onClick={onBack}>
         Zurück zu meinen Themen <ArrowRight size={18} />
+      </Button>
+      <Button
+        variant="secondary"
+        className="delete-results"
+        disabled={deleting || lesson.status === "active"}
+        onClick={() => onDelete(lesson)}
+      >
+        <Trash2 size={18} />{" "}
+        {deleting ? "Wird gelöscht …" : "Diese Lernergebnisse löschen"}
       </Button>
     </main>
   );

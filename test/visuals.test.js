@@ -86,70 +86,48 @@ test("local library resolves large teaching SVGs, aliases and actual emoji witho
   }
   assert.equal(findEmoji("a sofa inside a bus"), null);
   assert.equal(
-    normalizeVisual(element("spaceship kitchen")).missingEmoji,
+    normalizeVisual(element("spaceship kitchen")).textFallback,
     true,
   );
   assert.equal(normalizeVisual(element("red ball")).type, "shape");
   assert.equal(searchEmoji("sofa")[0].emoji, "🛋️");
 });
 
-test("missing emoji starts asynchronous image fallback and leaves a visible waiting state", async (t) => {
+test("missing emoji uses the German word without calling any image service", async (t) => {
   const store = new Store(":memory:");
   t.after(() => store.close());
   const lesson = store.create("objects", "missing-visual");
   store.connect(lesson.id, "test");
-  let resolveImage,
-    calls = 0;
-  const classroom = new Classroom(
-    store,
-    {
-      image: () => {
-        calls++;
-        return new Promise((resolve) => {
-          resolveImage = resolve;
-        });
-      },
-    },
-    { imageModel: "test", dataDir: ".cache/test" },
-  );
+  const classroom = new Classroom(store, {}, {});
   classroom.waitRendered = async () => {};
-  const args = {
-    expectedRevision: 0,
-    stepId: "missing",
-    title: "Bild",
-    operations: [
-      {
-        action: "upsert",
-        id: "object",
-        element: { ...element("spaceship kitchen"), type: "emoji" },
-      },
-    ],
-    question: null,
-    taught: [],
-  };
-  const result = await classroom.execute(
-    lesson.id,
-    "patch_board",
-    args,
-    "missing-board",
-    null,
-    new AbortController().signal,
-  );
-  assert.equal(result.images[0].status, "loading");
-  assert.equal(
-    store.publicLesson(lesson.id).state.elements[0].imageStatus,
-    "loading",
-  );
   await classroom.execute(
     lesson.id,
     "patch_board",
-    args,
+    {
+      expectedRevision: 0,
+      stepId: "missing",
+      title: "Üben",
+      operations: [
+        {
+          action: "upsert",
+          id: "object",
+          element: {
+            ...element("spaceship kitchen"),
+            type: "emoji",
+            translation: "Raumschiffküche",
+          },
+        },
+      ],
+      question: null,
+      taught: [],
+    },
     "missing-board",
     null,
     new AbortController().signal,
   );
-  assert.equal(calls, 1);
-  resolveImage({ hash: "missing", path: "/assets/teaching/missing.png" });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(store.lesson(lesson.id).state.elements[0].imageStatus, "ready");
+  const visual = store.publicLesson(lesson.id).state.elements[0];
+  assert.equal(visual.type, "text");
+  assert.equal(visual.text, "Raumschiffküche");
+  assert.equal(visual.src, undefined);
+  assert.equal(visual.imageStatus, undefined);
 });

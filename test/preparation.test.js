@@ -38,11 +38,11 @@ test("env model configuration is loadable, overridable and never loads a key fro
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   writeFileSync(
     join(dir, ".env"),
-    'ENGLISH_LIVE_MODEL="future-live"\nENGLISH_TEACHER_MODEL=future-text\nENGLISH_IMAGE_MODEL=future-image\nENGLISH_TRANSCRIPTION_MODEL=future-transcribe\nENGLISH_VOICE=voice\nOPENAI_API_KEY=not-a-real-secret\n',
+    'ENGLISH_LIVE_MODEL="future-live"\nENGLISH_TEACHER_MODEL=future-text\nENGLISH_TEACHER_REASONING_EFFORT=high\nENGLISH_TRANSCRIPTION_MODEL=future-transcribe\nENGLISH_VOICE=voice\nOPENAI_API_KEY=not-a-real-secret\n',
   );
   assert.equal(loadConfig({}, dir).liveModel, "future-live");
   assert.equal(loadConfig({}, dir).teacherModel, "future-text");
-  assert.equal(loadConfig({}, dir).imageModel, "future-image");
+  assert.equal(loadConfig({}, dir).teacherReasoningEffort, "high");
   assert.equal(loadConfig({}, dir).transcriptionModel, "future-transcribe");
   assert.equal(
     loadConfig({ ENGLISH_TRANSCRIPTION_MODEL: "system-transcribe" }, dir)

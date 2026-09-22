@@ -154,18 +154,125 @@ test("a real disconnect still releases the session and preserves lesson progress
   assert.equal(store.results(id).taught[0].text, "cat");
 });
 
+test("a child's goodbye ends the lesson after exactly three seconds without input", async (t) => {
+  const { classroom, store, id, closed } = await connectedSetup(t);
+  classroom.onEvent(id, {
+    type: "session.input_transcript.delta",
+    event_id: "goodbye",
+    start_ms: 100,
+    end_ms: 800,
+    delta: "Tschüsschen!",
+  });
+  t.mock.timers.tick(2999);
+  assert.equal(store.lesson(id).status, "active");
+  t.mock.timers.tick(1);
+  assert.equal(store.lesson(id).status, "ended_early");
+  assert.deepEqual(closed, ["live-test"]);
+  await classroom.room(id).ending;
+});
+
+test("new speech during the goodbye countdown cancels closure, including a prepared finish", async (t) => {
+  const { classroom, store, id, room, closed } = await connectedSetup(t);
+  store.requestFinish(id, "completed");
+  const say = (delta, event_id, start_ms = 100) =>
+    classroom.onEvent(id, {
+      type: "session.input_transcript.delta",
+      event_id,
+      delta,
+      start_ms,
+      end_ms: start_ms + 400,
+    });
+  say("Tschüss!", "bye");
+  t.mock.timers.tick(2800);
+  say("Warte, ich habe eine Frage!", "wait", 3000);
+  t.mock.timers.tick(10000);
+  assert.equal(store.lesson(id).status, "active");
+  assert.equal(store.lesson(id).state.readyToFinish, false);
+  assert.deepEqual(closed, []);
+  assert.equal(room.goodbyeToken, null);
+});
+
+test("microphone activity cancels goodbye before a transcript arrives; stale activity does not", async (t) => {
+  const { classroom, store, id, room } = await connectedSetup(t);
+  classroom.onEvent(id, {
+    type: "session.input_transcript.delta",
+    event_id: "bye-audio",
+    delta: "Tüssche!",
+    start_ms: 100,
+    end_ms: 500,
+  });
+  const token = room.goodbyeToken;
+  t.mock.timers.tick(2800);
+  classroom.inputActivity(id, "stale-token");
+  assert.equal(room.goodbyeToken, token);
+  classroom.inputActivity(id, token);
+  t.mock.timers.tick(10000);
+  assert.equal(store.lesson(id).status, "active");
+  assert.equal(room.goodbyeToken, null);
+});
+
+test("fragmented goodbye waits three seconds from the last fragment; teacher output does not delay it", async (t) => {
+  const { classroom, store, id } = await connectedSetup(t);
+  classroom.onEvent(id, {
+    type: "session.input_transcript.delta",
+    event_id: "part1",
+    delta: "Tsch",
+    start_ms: 100,
+    end_ms: 200,
+  });
+  t.mock.timers.tick(500);
+  classroom.onEvent(id, {
+    type: "session.input_transcript.delta",
+    event_id: "part2",
+    delta: "üsschen!",
+    start_ms: 200,
+    end_ms: 400,
+  });
+  t.mock.timers.tick(2500);
+  classroom.onEvent(id, {
+    type: "session.output_transcript.delta",
+    event_id: "teacher-bye",
+    delta: "Tschüss!",
+    start_ms: 500,
+    end_ms: 1000,
+  });
+  assert.equal(store.lesson(id).status, "active");
+  t.mock.timers.tick(500);
+  assert.equal(store.lesson(id).status, "ended_early");
+  await classroom.room(id).ending;
+});
+
+test("a teacher farewell or a question containing Tschüss never starts automatic closure", async (t) => {
+  const { classroom, store, id } = await connectedSetup(t);
+  classroom.onEvent(id, {
+    type: "session.output_transcript.delta",
+    event_id: "teacher",
+    delta: "Tschüss!",
+    start_ms: 0,
+    end_ms: 500,
+  });
+  classroom.onEvent(id, {
+    type: "session.input_transcript.delta",
+    event_id: "question",
+    delta: "Wie sagt man Tschüss auf Englisch?",
+    start_ms: 1000,
+    end_ms: 2000,
+  });
+  t.mock.timers.tick(10000);
+  assert.equal(store.lesson(id).status, "active");
+});
+
 function setup(t, ai) {
   const store = new Store(":memory:");
   t.after(() => store.close());
   const l = store.create("animals", "start");
   store.connect(l.id, "live-test");
   const classroom = new Classroom(store, ai, {
-    imageModel: "test",
     dataDir: ".cache/test",
   });
   const element = {
     id: "animal",
-    type: "image",
+    type: "emoji",
     text: "cat",
     translation: "Katze",
     shape: "none",
@@ -197,41 +304,6 @@ function setup(t, ai) {
     },
   };
 }
-test("late image is cached but never overwrites a newer teaching step", async (t) => {
-  let deliver;
-  const ai = { image: () => new Promise((r) => (deliver = r)) };
-  const { store, classroom, id, args } = setup(t, ai);
-  assert.equal(
-    (await classroom.generateImage(id, args, new AbortController().signal))
-      .status,
-    "loading",
-  );
-  store.updateBoard(id, "next", {
-    expectedRevision: 1,
-    stepId: "dog-step",
-    title: "dog",
-    operations: [{ action: "clear", id: null, element: null }],
-    question: null,
-    taught: [],
-  });
-  deliver({ hash: "hash", path: "/assets/teaching/hash.png" });
-  await new Promise((r) => setImmediate(r));
-  assert.equal(store.lesson(id).state.title, "dog");
-  assert.equal(store.lesson(id).state.elements.length, 0);
-  assert.equal(store.db.prepare("SELECT COUNT(*) n FROM images").get().n, 1);
-});
-test("image failure leaves current learning content and permits further teaching", async (t) => {
-  const { store, classroom, id, args } = setup(t, {
-    image: async () => {
-      throw new Error("offline");
-    },
-  });
-  await classroom.generateImage(id, args, new AbortController().signal);
-  await new Promise((r) => setImmediate(r));
-  assert.equal(store.lesson(id).state.elements[0].imageStatus, "failed");
-  assert.equal(store.results(id).taught.length, 1);
-  assert.equal(store.lesson(id).status, "active");
-});
 test("summary failure cannot roll back a completed lesson or learned words", async (t) => {
   const { store, classroom, id } = setup(t, {
     closeLive: async () => {},
@@ -354,4 +426,53 @@ test("a clear short answer prompts backend review but never scores directly from
   t.mock.timers.tick(1700);
   assert.equal(reviews.length, 1);
   assert.equal(store.results(id).attempts.length, 0);
+});
+
+test("a farewell after a quick teacher reply is separate from the preceding answer", async (t) => {
+  const { classroom, store, id } = await connectedSetup(t);
+  classroom.onEvent(id, {
+    type: "session.input_transcript.delta",
+    event_id: "answer-before",
+    delta: "cat",
+    start_ms: 0,
+    end_ms: 200,
+  });
+  classroom.onEvent(id, {
+    type: "session.output_transcript.delta",
+    event_id: "reply-before",
+    delta: "Prima!",
+    start_ms: 200,
+    end_ms: 400,
+  });
+  classroom.onEvent(id, {
+    type: "session.input_transcript.delta",
+    event_id: "bye-after",
+    delta: "Tschüss!",
+    start_ms: 500,
+    end_ms: 800,
+  });
+  t.mock.timers.tick(3000);
+  assert.equal(store.lesson(id).status, "ended_early");
+  await classroom.room(id).ending;
+});
+
+test("a corrected farewell transcript cancels closure instead of appending stale words", async (t) => {
+  const { classroom, store, id } = await connectedSetup(t);
+  classroom.onEvent(id, {
+    type: "session.input_transcript.delta",
+    event_id: "original",
+    delta: "Tschüss!",
+    start_ms: 100,
+    end_ms: 500,
+  });
+  t.mock.timers.tick(2000);
+  classroom.onEvent(id, {
+    type: "session.input_transcript.delta",
+    event_id: "corrected",
+    delta: "Noch nicht Tschüss!",
+    start_ms: 100,
+    end_ms: 800,
+  });
+  t.mock.timers.tick(5000);
+  assert.equal(store.lesson(id).status, "active");
 });

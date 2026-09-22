@@ -2,6 +2,8 @@ import { Store } from "../server/store.js";
 import { createApp } from "../server/app.js";
 import { Preparation } from "../server/preparation.js";
 import { practiceBoard } from "../server/practice.js";
+import { Classroom } from "../server/classroom.js";
+import { topics } from "../shared/topics.js";
 const store = new Store(":memory:");
 const config = {
   port: 3213,
@@ -9,12 +11,14 @@ const config = {
   dataDir: ".cache/browser-data",
   liveModel: "gpt-live-1",
   teacherModel: "gpt-5.6-terra",
-  imageModel: "gpt-image-2.5-flare",
   transcriptionModel: "gpt-transcribe",
   voice: "marin",
 };
 const clients = new Set();
 const classroom = {
+  deleteResults(id) {
+    return store.deleteLesson(id);
+  },
   async connect(id) {
     store.connect(id, "fixture-remote");
     this.publish(id);
@@ -255,6 +259,69 @@ const ai = {
   },
 };
 const app = createApp({ store, classroom, config, preparation, ai });
+// Exercise the actual farewell timer through a separate fixture-only classroom.
+const farewell = new Classroom(
+  store,
+  {
+    closeLive: async () => {},
+    responses: async () => {
+      throw new Error("No live API in fixtures");
+    },
+  },
+  config,
+);
+farewell.publish = (id) => classroom.publish(id);
+farewell.emit = (_id, type, data) => classroom.emit(type, data);
+classroom.inputActivity = (id, token) => farewell.inputActivity(id, token);
+app.post("/fixture/goodbye", (req, res) => {
+  const room = farewell.room(l.id);
+  room.ready = true;
+  room.remoteId = "fixture-remote";
+  farewell.onEvent(l.id, {
+    type: "session.input_transcript.delta",
+    event_id: `farewell-${Date.now()}`,
+    delta: "Tschüsschen!",
+    start_ms: Date.now(),
+    end_ms: Date.now() + 100,
+  });
+  res.json({ ok: true });
+});
+app.post("/fixture/result", (_req, res) => {
+  for (const row of store.db
+    .prepare("SELECT id FROM lessons WHERE status='active'")
+    .all())
+    store.finish(row.id, "interrupted");
+  // The earlier deletion UI tests deliberately remove the full catalog.
+  const fixtureTopic = {
+    ...topics.find((t) => t.id === "animals"),
+    id: "result-fixture",
+    name: "Test-Lernergebnisse",
+    teachingNotes: "",
+    coverage: "small_steps",
+  };
+  store.db
+    .prepare("INSERT OR IGNORE INTO topics VALUES(?,?,1)")
+    .run(fixtureTopic.id, JSON.stringify(fixtureTopic));
+  const lesson = store.create(fixtureTopic.id, `result-${crypto.randomUUID()}`);
+  store.connect(lesson.id, "fixture-result");
+  store.updateBoard(
+    lesson.id,
+    `board-${lesson.id}`,
+    practiceBoard(
+      {
+        expectedRevision: 0,
+        mode: "repeat",
+        word: "cat",
+        german: "Katze",
+        distractors: [],
+      },
+      lesson.topic,
+    ),
+  );
+  store.finish(lesson.id, "ended_early");
+  store.setSummary(lesson.id, { message: "Du hast cat geübt." }, "ready");
+  res.json(store.publicLesson(lesson.id));
+});
 // Fixture-only controls exercise the browser's real SSE and media cleanup path.
 app.post("/fixture/disconnect", async (req, res) => {
   await classroom.end(l.id, "interrupted");
@@ -270,7 +337,10 @@ app.post("/fixture/practice", (req, res) => {
     store.finish(row.id, "ended_early");
   const current = store.lesson(l.id);
   store.connect(l.id, "fixture-remote");
-  const topic = { ...current.topic, words: ["bus", "train", "sofa"] };
+  const topic = {
+    ...current.topic,
+    words: ["bus", "train", "sofa", "striped lunchbox"],
+  };
   store.updateBoard(
     l.id,
     `fixture-${Date.now()}`,

@@ -8,6 +8,18 @@ export function loadConfig(env = process.env, directory = root) {
   const file = existsSync(path) ? parseEnv(readFileSync(path, "utf8")) : {};
   const setting = (key, fallback) =>
     env[key]?.trim() || file[key]?.trim() || fallback;
+  const teacherReasoningEffort = setting(
+    "ENGLISH_TEACHER_REASONING_EFFORT",
+    "low",
+  );
+  if (
+    !["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(
+      teacherReasoningEffort,
+    )
+  )
+    throw new Error(
+      "ENGLISH_TEACHER_REASONING_EFFORT must be none, minimal, low, medium, high, xhigh or max (depending on the model).",
+    );
   return {
     port: Number(env.ENGLISH_PORT || 3210),
     dataDir: resolve(env.ENGLISH_DATA_DIR || resolve(directory, "data")),
@@ -15,7 +27,7 @@ export function loadConfig(env = process.env, directory = root) {
     apiKey: (env.openai_api_key || env.OPENAI_API_KEY || "").trim(),
     liveModel: setting("ENGLISH_LIVE_MODEL", "gpt-live-1"),
     teacherModel: setting("ENGLISH_TEACHER_MODEL", "gpt-5.6-terra"),
-    imageModel: setting("ENGLISH_IMAGE_MODEL", "gpt-image-2.5-flare"),
+    teacherReasoningEffort,
     transcriptionModel: setting(
       "ENGLISH_TRANSCRIPTION_MODEL",
       "gpt-transcribe",

@@ -5,7 +5,6 @@ console.log("Environment API key configured:", Boolean(config.apiKey));
 for (const model of [
   config.liveModel,
   config.teacherModel,
-  config.imageModel,
   config.transcriptionModel,
 ]) {
   try {

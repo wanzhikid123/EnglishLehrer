@@ -51,7 +51,7 @@ export class LiveConnection {
     this.audioContext = new AudioContext();
     await this.audioContext.resume();
     this.analyzers = [];
-    this.watchAudio(this.stream);
+    this.watchAudio(this.stream, true);
     pc.ontrack = (e) => {
       const remote = e.streams[0] || new MediaStream([e.track]);
       this.audio.srcObject = remote;
@@ -150,7 +150,7 @@ export class LiveConnection {
   }
   sampleAudio() {
     let level = 0;
-    for (const analyser of this.analyzers) {
+    for (const { analyser, isInput } of this.analyzers) {
       const samples = new Uint8Array(analyser.fftSize);
       analyser.getByteTimeDomainData(samples);
       const rms =
@@ -158,17 +158,26 @@ export class LiveConnection {
           samples.reduce((sum, v) => sum + (v - 128) ** 2, 0) / samples.length,
         ) / 128;
       level = Math.max(level, rms);
+      if (isInput) {
+        if (rms > 0.025) {
+          if (!this.inputSpeaking) this.callbacks.onInputActivity?.();
+          this.inputSpeaking = true;
+          this.lastInputEnergy = Date.now();
+        } else if (Date.now() - (this.lastInputEnergy || 0) >= 300) {
+          this.inputSpeaking = false;
+        }
+      }
     }
     if (level > 0.025) this.lastActivity = Date.now();
     this.callbacks.onLevel?.(Math.min(1, level * 5));
   }
-  watchAudio(stream) {
+  watchAudio(stream, isInput = false) {
     try {
       const source = this.audioContext.createMediaStreamSource(stream);
       const analyser = this.audioContext.createAnalyser();
       analyser.fftSize = 256;
       source.connect(analyser);
-      this.analyzers.push(analyser);
+      this.analyzers.push({ analyser, isInput });
     } catch {}
   }
   mute(muted) {

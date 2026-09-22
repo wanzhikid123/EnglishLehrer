@@ -45,7 +45,6 @@ export class Store {
         knowledge TEXT, option_id TEXT, mode TEXT, outcome TEXT, hinted INTEGER, created_at INTEGER);
       CREATE INDEX IF NOT EXISTS attempts_knowledge ON attempts(knowledge,created_at);
       CREATE TABLE IF NOT EXISTS events (event_id TEXT PRIMARY KEY, lesson_id TEXT REFERENCES lessons(id), kind TEXT, created_at INTEGER, result TEXT);
-      CREATE TABLE IF NOT EXISTS images (hash TEXT PRIMARY KEY, path TEXT NOT NULL, topic_id TEXT, knowledge TEXT, created_at INTEGER);
       CREATE TABLE IF NOT EXISTS topics (id TEXT PRIMARY KEY, payload TEXT NOT NULL, revision INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS lesson_plans (topic_id TEXT PRIMARY KEY, topic_revision INTEGER NOT NULL, revision INTEGER NOT NULL, payload TEXT NOT NULL, updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS deleted_topics (id TEXT PRIMARY KEY, deleted_at INTEGER NOT NULL);
@@ -98,9 +97,21 @@ export class Store {
   lesson(id) {
     const row = this.db.prepare("SELECT * FROM lessons WHERE id=?").get(id);
     if (!row) throw new AppError("Diese Stunde wurde nicht gefunden.", 404);
+    const state = JSON.parse(row.state);
+    state.elements = state.elements.map((element) =>
+      element.type === "image" ? normalizeVisual(element) : element,
+    );
+    if (
+      state.question?.mode === "picture_speak" &&
+      state.elements.some((e) => e.textFallback)
+    ) {
+      const meaning = state.elements.find((e) => e.textFallback).text;
+      state.question.mode = "german_speak";
+      state.question.prompt = `Wie heißt „${meaning}“ auf Englisch?`;
+    }
     return {
       ...row,
-      state: JSON.parse(row.state),
+      state,
       summary: row.summary ? JSON.parse(row.summary) : null,
       topic: JSON.parse(row.state).topicSnapshot || this.topic(row.topic_id),
     };
@@ -250,11 +261,24 @@ export class Store {
           )
             throw new AppError("Tafelelement liegt außerhalb der Tafel.");
           state.elements = state.elements.filter((e) => e.id !== op.id);
-          state.elements.push(normalizeVisual(op.element, visualWord));
+          const visual = normalizeVisual(op.element, visualWord);
+          if (visual.textFallback && !op.element.translation.trim())
+            throw new AppError(
+              "Kein passendes Emoji. Bitte die deutsche Bedeutung in translation angeben oder deutschen Text verwenden.",
+            );
+          state.elements.push(visual);
         }
       }
       if (state.elements.length > 20)
         throw new AppError("Zu viele Tafelelemente.");
+      if (
+        data.question?.mode === "picture_speak" &&
+        state.elements.some((e) => e.textFallback)
+      ) {
+        const meaning = state.elements.find((e) => e.textFallback).text;
+        data.question.mode = "german_speak";
+        data.question.prompt = `Wie heißt „${meaning}“ auf Englisch?`;
+      }
       // A step and its question change in one transaction and one browser snapshot.
       if (state.question?.status === "open")
         this.db
@@ -296,16 +320,6 @@ export class Store {
           reason: "Diese Frage ist nicht mehr offen.",
         };
       const option = q.options.find((o) => o.id === data.optionId);
-      if (
-        q.mode === "picture_speak" &&
-        lesson.state.elements.some((e) => e.type === "image" && !e.src)
-      )
-        return {
-          ok: false,
-          ignored: true,
-          reason:
-            "Das Bild ist noch nicht bereit. Keine Antwort auf ein unsichtbares Bild bewerten.",
-        };
       const spoken = ["repeat", "picture_speak", "german_speak"].includes(
         q.mode,
       );
@@ -449,6 +463,22 @@ export class Store {
           hinted: Boolean(q.hinted),
         })),
     };
+  }
+  deleteLesson(id) {
+    return this.transaction(() => {
+      const lesson = this.lesson(id);
+      if (lesson.status === "active")
+        throw new AppError("Bitte die laufende Stunde zuerst beenden.", 409);
+      for (const table of ["attempts", "questions", "taught", "events"])
+        this.db.prepare(`DELETE FROM ${table} WHERE lesson_id=?`).run(id);
+      this.db
+        .prepare(
+          "UPDATE preparation_turns SET lesson_id=NULL WHERE lesson_id=?",
+        )
+        .run(id);
+      this.db.prepare("DELETE FROM lessons WHERE id=?").run(id);
+      return { ok: true };
+    });
   }
   mastery(topicId) {
     const rows = this.db
