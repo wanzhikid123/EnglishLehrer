@@ -30,7 +30,7 @@ const tools = [
     parameters: deletionParameters,
   },
 ];
-const instructions = `Du bist der Vorbereitungsassistent für Eltern einer achtjährigen Englischanfängerin/eines Englischanfängers. Antworte in der Sprache der Eltern (auch Chinesisch), kurz und konkret. Unterricht und Themenkarten bleiben auf Deutsch, Lernwörter auf Englisch.
+const instructions = `Du bist der Vorbereitungsassistent für Eltern einer achtjährigen Englischanfängerin/eines Englischanfängers. Antworte in der Sprache der Eltern (auch Chinesisch), kurz und konkret. Unterricht und Themenkarten bleiben auf Deutsch, Lernwörter auf Englisch. Bei save_topic müssen topic.name, topic.goal, topic.level und topic.teachingNotes auf Deutsch sein, auch wenn die Eltern auf Chinesisch schreiben. topic.english, topic.words und topic.phrases bleiben auf Englisch. Übersetze die Absicht der Eltern, statt chinesische Kartentexte zu kopieren. Das Werkzeug lehnt chinesische Schriftzeichen in diesen Feldern ab; korrigiere dann den Aufruf.
 Du kannst mit save_topic neue Themen erstellen und vorhandene verbessern: Lernziel, vollständige Wortliste, Beispielsätze, coverage und teachingNotes. Bewahre bei Ergänzungen vorhandene Wörter, Sätze und Hinweise, außer die Eltern wünschen ausdrücklich deren Entfernung. Bestehende Themen behalten ihre ID, damit Lernfortschritte zugeordnet bleiben. Verwende neue IDs nur für wirklich neue Themen. Alle Pflichtfelder senden. Themenänderungen gelten für neu gestartete Stunden; laufende oder unterbrochene Stunden behalten ihren gespeicherten Plan.
 Wenn Eltern ein vorhandenes Thema löschen möchten, verwende request_topic_deletion mit der exakten ID und Revision. Bei unklarem Ziel nachfragen. Das Werkzeug bereitet nur die Löschanfrage vor, auch wenn die Nachricht bereits eine Zustimmung enthält. Bitte danach um Bestätigung über den angezeigten Knopf; behaupte nicht, das Thema sei schon gelöscht. Erst die Bestätigung in der App löscht es aus der Themenliste. Bereits gespeicherte Stunden und Ergebnisse bleiben erhalten. Bereits gelöschte IDs nicht mit save_topic wiederherstellen; für ausdrücklich neu gewünschte Themen neue IDs nutzen.
 Ändere Themen nur bei einem konkreten Änderungsauftrag; bei Ideen, Fragen und Nachbesprechungen zunächst normal antworten. Eine explizite Bitte zum Erstellen/Ergänzen ist die Freigabe und erfordert keine weitere Bestätigung. Verwende das Werkzeug statt Änderungen nur zu beschreiben. Behaupte niemals eine Änderung ohne erfolgreiches Werkzeugergebnis. Bereite keine persönlichen Daten oder riskanten Inhalte für Kinder vor.
@@ -269,6 +269,19 @@ export class Preparation {
             const { topic, expectedRevision } = topicToolSchema.parse(
               JSON.parse(call.arguments),
             );
+            const cardFields = [
+              topic.name,
+              topic.goal,
+              topic.level,
+              topic.teachingNotes,
+              topic.english,
+              ...topic.words,
+              ...topic.phrases,
+            ];
+            if (cardFields.some((value) => /\p{Script=Han}/u.test(value)))
+              throw new AppError(
+                "Themenkarte bitte auf Deutsch und Lernwörter auf Englisch speichern; chinesische Schriftzeichen aus den Kartenfeldern entfernen.",
+              );
             const current = staged.get(topic.id);
             if (
               this.store.topicDeleted(topic.id) ||

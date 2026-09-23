@@ -163,7 +163,7 @@ test("unclear speech is preserved separately and does not make mastery incorrect
   assert.equal(store.mastery("colors")[0].status, "observing");
   assert.equal(store.mastery("colors")[0].attemptCount, 0);
 });
-test("wrong click and matching voice merge; hinted retry is a distinct correct attempt", (t) => {
+test("wrong click and matching voice merge after choice closes; late retry cannot change the result", (t) => {
   const { store, id, advance } = setup(t);
   store.updateBoard(id, "step", board());
   store.answer(id, answer({ optionId: "b" }));
@@ -173,13 +173,27 @@ test("wrong click and matching voice merge; hinted retry is a distinct correct a
     answer({ eventId: "voice-1", optionId: "b", mode: "voice" }),
   );
   assert.equal(duplicate.duplicate, true);
-  store.hint(id, "q1");
   advance(2000);
   const result = store.answer(id, answer({ eventId: "retry-1" }));
-  assert.equal(result.outcome, "correct");
-  assert.equal(result.hinted, true);
-  assert.equal(store.results(id).attempts.length, 2);
+  assert.equal(result.ignored, true);
+  assert.equal(store.results(id).attempts.length, 1);
   assert.equal(store.mastery("colors")[0].status, "review");
+});
+
+test("wrong click on a choice reveals both marks and closes the question", (t) => {
+  const { store, id } = setup(t);
+  store.updateBoard(id, "choice-board", board());
+  const result = store.answer(id, answer({ optionId: "b" }));
+  assert.equal(result.outcome, "incorrect");
+  const visible = store.publicLesson(id).state.question;
+  assert.equal(visible.status, "answered");
+  assert.equal(visible.selectedOptionId, "b");
+  assert.equal(visible.correctOptionId, "a");
+  assert.match(visible.feedback, /red/);
+  assert.equal(
+    store.answer(id, answer({ eventId: "late-retry", optionId: "a" })).ignored,
+    true,
+  );
 });
 test("late answer cannot score against next question and unanswered questions are not mistakes", (t) => {
   const { store, id } = setup(t);

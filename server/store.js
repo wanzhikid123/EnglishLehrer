@@ -313,12 +313,25 @@ export class Store {
     return this.remember(id, data.eventId, "answer", () => {
       const lesson = this.active(id);
       const q = lesson.state.question;
-      if (!q || q.id !== data.questionId || q.status !== "open")
+      if (!q || q.id !== data.questionId)
         return {
           ok: false,
           ignored: true,
           reason: "Diese Frage ist nicht mehr offen.",
         };
+      if (q.status !== "open") {
+        const prior = this.db
+          .prepare(
+            "SELECT * FROM attempts WHERE lesson_id=? AND question_id=? AND option_id IS ? AND mode<>? AND ABS(created_at-?)<4500 ORDER BY created_at DESC LIMIT 1",
+          )
+          .get(id, q.id, data.optionId, data.mode, occurredAt);
+        if (prior) return { ok: true, duplicate: true, outcome: prior.outcome };
+        return {
+          ok: false,
+          ignored: true,
+          reason: "Diese Frage ist nicht mehr offen.",
+        };
+      }
       const option = q.options.find((o) => o.id === data.optionId);
       const spoken = ["repeat", "picture_speak", "german_speak"].includes(
         q.mode,
@@ -339,6 +352,8 @@ export class Store {
         : data.optionId === q.correctOptionId
           ? "correct"
           : "incorrect";
+      const choice = ["choice", "german_choice"].includes(q.mode);
+      const spokenRecall = ["picture_speak", "german_speak"].includes(q.mode);
       this.db
         .prepare("INSERT INTO attempts VALUES(?,?,?,?,?,?,?,?,?)")
         .run(
@@ -352,7 +367,11 @@ export class Store {
           Number(hinted),
           occurredAt,
         );
-      if (outcome === "correct") {
+      if (outcome !== "uncertain" && choice) q.selectedOptionId = data.optionId;
+      if (
+        outcome === "correct" ||
+        (outcome === "incorrect" && (choice || spokenRecall))
+      ) {
         q.status = "answered";
         this.db
           .prepare(
@@ -360,6 +379,38 @@ export class Store {
           )
           .run(id, q.id);
       }
+      if (outcome !== "uncertain" && spokenRecall) {
+        const label =
+          q.options.find((o) => o.id === q.correctOptionId)?.label ||
+          q.knowledge;
+        if (!lesson.state.elements.some((e) => e.id === "practice-answer")) {
+          lesson.state.elements = lesson.state.elements.filter(
+            (e) => e.id !== "practice-answer",
+          );
+          lesson.state.elements.push({
+            id: "practice-answer",
+            type: "text",
+            text: label,
+            translation: "",
+            shape: "none",
+            color: "#246838",
+            x: 5,
+            y: 74,
+            width: 90,
+            height: 23,
+            fontSize: 64,
+            highlight: false,
+          });
+        }
+        if (outcome === "incorrect") {
+          q.hinted = true;
+          this.db
+            .prepare("UPDATE questions SET hinted=1 WHERE lesson_id=? AND id=?")
+            .run(id, q.id);
+        }
+      }
+      const correctLabel =
+        q.options.find((o) => o.id === q.correctOptionId)?.label || q.knowledge;
       q.feedback =
         outcome === "correct"
           ? "Prima, das stimmt!"
@@ -367,7 +418,11 @@ export class Store {
             ? spoken
               ? "Das habe ich noch nicht sicher verstanden. Sag es bitte noch einmal."
               : "Das habe ich noch nicht sicher verstanden. Sag es noch einmal oder klicke."
-            : "Fast! Versuch es noch einmal. Du schaffst das.";
+            : choice
+              ? `Nicht ganz. Richtig ist ${correctLabel}.`
+              : spokenRecall
+                ? `Nicht ganz. Das englische Wort ist ${correctLabel}. Sprich es nach.`
+                : "Fast! Versuch es noch einmal. Du schaffst das.";
       this.saveState(id, lesson.state);
       return {
         ok: true,
@@ -573,7 +628,11 @@ export class Store {
     // in the classroom snapshot or the child's caption context.
     delete state.planSnapshot;
     if (state.question) {
-      delete state.question.correctOptionId;
+      if (
+        state.question.status !== "answered" ||
+        !["choice", "german_choice"].includes(state.question.mode)
+      )
+        delete state.question.correctOptionId;
       delete state.question.hint;
       if (
         ["repeat", "picture_speak", "german_speak"].includes(

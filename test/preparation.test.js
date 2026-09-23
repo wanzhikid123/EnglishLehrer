@@ -108,6 +108,45 @@ test("topic edits and new topics survive restart while historical lessons keep t
   assert.equal(store.home().topics.length, 8);
 });
 
+test("Chinese preparation chat cannot save Chinese topic card fields", async (t) => {
+  const store = new Store(":memory:");
+  t.after(() => store.close());
+  const source = store.topic("colors");
+  const chinese = {
+    ...source,
+    id: "fruit",
+    name: "水果主题",
+    english: "Fruit",
+    goal: "学习水果",
+    level: "初学者",
+    teachingNotes: "先学苹果",
+    words: ["apple"],
+  };
+  const german = {
+    ...chinese,
+    name: "Obst entdecken",
+    goal: "Lerne Obst auf Englisch kennen.",
+    level: "Erste Wörter",
+    teachingNotes: "Beginne mit apple.",
+  };
+  const outputs = [call(chinese, 0), call(german, 0, "save-2"), text()];
+  let rejected;
+  const preparation = new Preparation(store, {
+    responses: async (input) => {
+      if (outputs.length === 2) rejected = JSON.parse(input.at(-1).output);
+      return outputs.shift();
+    },
+  });
+  await preparation.chat({
+    ...request("chinese-topic"),
+    message: "请创建水果主题",
+    topicId: null,
+  });
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.error, /Deutsch/);
+  assert.equal(store.topic("fruit").name, "Obst entdecken");
+});
+
 test("version-one databases upgrade without losing lessons or learned words", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "english-migration-"));
   const path = join(dir, "learning.sqlite");

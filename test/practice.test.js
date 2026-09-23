@@ -99,7 +99,7 @@ for (const mode of [
       assert.equal(store.mastery("animals")[0].attemptCount || 0, 0);
   });
 }
-test("spoken questions reject clicks; uncertainty, wrong words and hinted retry stay distinct", (t) => {
+test("spoken recall rejects clicks, leaves unclear speech open, and closes after correction", (t) => {
   const { store, id, q } = setup(t, "german_speak");
   const data = {
     questionId: q.id,
@@ -122,6 +122,7 @@ test("spoken questions reject clicks; uncertainty, wrong words and hinted retry 
     }).outcome,
     "uncertain",
   );
+  assert.equal(store.lesson(id).state.question.status, "open");
   assert.equal(
     store.answer(id, {
       ...data,
@@ -131,13 +132,127 @@ test("spoken questions reject clicks; uncertainty, wrong words and hinted retry 
     }).outcome,
     "incorrect",
   );
-  assert.equal(store.lesson(id).state.question.status, "open");
-  store.hint(id, q.id);
+  assert.equal(store.lesson(id).state.question.status, "answered");
   assert.equal(
-    store.answer(id, { ...data, eventId: "retry", mode: "voice" }).hinted,
+    store.answer(id, { ...data, eventId: "retry", mode: "voice" }).ignored,
     true,
   );
-  assert.equal(store.results(id).attempts.length, 3);
+  assert.equal(store.results(id).attempts.length, 2);
+});
+
+test("spoken recall reveals the English answer on the board after correct or corrected wrong speech", (t) => {
+  for (const mode of ["german_speak", "picture_speak"]) {
+    const { store, id, q } = setup(t, mode);
+    const before = store.publicLesson(id);
+    assert.ok(
+      !before.state.elements.some((e) => e.type === "text" && e.text === "cat"),
+    );
+    store.answer(id, {
+      eventId: `${mode}-wrong`,
+      questionId: q.id,
+      optionId: null,
+      mode: "voice",
+      uncertain: false,
+      hinted: false,
+    });
+    assert.ok(
+      store
+        .publicLesson(id)
+        .state.elements.some((e) => e.type === "text" && e.text === "cat"),
+    );
+    store.answer(id, {
+      eventId: `${mode}-right`,
+      questionId: q.id,
+      optionId: q.correctOptionId,
+      mode: "voice",
+      uncertain: false,
+      hinted: true,
+    });
+    assert.equal(
+      store
+        .publicLesson(id)
+        .state.elements.filter((e) => e.type === "text" && e.text === "cat")
+        .length,
+      1,
+    );
+    store.updateBoard(
+      id,
+      `${mode}-next`,
+      practiceBoard(
+        {
+          expectedRevision: store.lesson(id).state.revision,
+          mode: "german_speak",
+          word: "dog",
+          german: "Hund",
+          distractors: [],
+        },
+        store.lesson(id).topic,
+      ),
+    );
+    assert.ok(
+      !store
+        .publicLesson(id)
+        .state.elements.some((e) => e.type === "text" && e.text === "cat"),
+    );
+  }
+});
+
+test("spoken multiple choice reveals marks and correct English word, then closes the question", (t) => {
+  const { store, id, q } = setup(t, "german_choice");
+  const wrong = q.options.find((o) => o.id !== q.correctOptionId);
+  assert.equal(
+    store.publicLesson(id).state.question.correctOptionId,
+    undefined,
+  );
+  store.answer(id, {
+    eventId: "choice-wrong",
+    questionId: q.id,
+    optionId: wrong.id,
+    mode: "voice",
+    uncertain: false,
+    hinted: false,
+  });
+  const visible = store.publicLesson(id).state.question;
+  assert.equal(visible.status, "answered");
+  assert.equal(visible.selectedOptionId, wrong.id);
+  assert.equal(visible.correctOptionId, q.correctOptionId);
+  assert.match(visible.feedback, new RegExp(q.knowledge, "i"));
+});
+
+test("spoken recall writes a distinct English label when German and English differ only by case", (t) => {
+  const store = new Store(":memory:");
+  t.after(() => store.close());
+  const lesson = store.create("objects", "ball-lesson");
+  store.connect(lesson.id, "test");
+  store.updateBoard(
+    lesson.id,
+    "ball-board",
+    practiceBoard(
+      {
+        expectedRevision: 0,
+        mode: "german_speak",
+        word: "ball",
+        german: "Ball",
+        distractors: [],
+      },
+      lesson.topic,
+    ),
+  );
+  const q = store.lesson(lesson.id).state.question;
+  store.answer(lesson.id, {
+    eventId: "ball-answer",
+    questionId: q.id,
+    optionId: q.correctOptionId,
+    mode: "voice",
+    uncertain: false,
+    hinted: false,
+  });
+  assert.equal(
+    store
+      .publicLesson(lesson.id)
+      .state.elements.find((e) => e.id === "practice-answer")?.text,
+    "ball",
+  );
 });
 test("legacy image exercises use German text and remain answerable", (t) => {
   const { store, id, q } = setup(t, "picture_speak");

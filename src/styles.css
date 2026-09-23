@@ -1146,6 +1146,12 @@ button svg {
   display: block;
   margin-top: 10px;
 }
+.board-element[data-element-id="practice-answer"] {
+  z-index: 1;
+  background: #ffffffed;
+  border-radius: 14px;
+  box-shadow: 0 2px 12px #27482e20;
+}
 .board-element svg {
   width: 100%;
   height: 100%;
@@ -1256,6 +1262,32 @@ button svg {
   border-color: #7f9a65;
   transform: translateY(-3px);
   background: #f3f7ed;
+}
+.quiz-options button.is-correct {
+  border-color: #62a65c;
+  background: #f1f9ee;
+}
+.quiz-options button.is-incorrect {
+  border-color: #d8756e;
+  background: #fff3f1;
+}
+.option-mark {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  border-radius: 50%;
+}
+.option-mark.correct {
+  color: #28753a;
+  background: #d9f1d9;
+}
+.option-mark.incorrect {
+  color: #a53430;
+  background: #ffe0dd;
 }
 .quiz-options strong {
   font-size: 18px;

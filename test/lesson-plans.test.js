@@ -318,7 +318,10 @@ async function classroomSetup(
   classroom.send = async () => {};
   const room = classroom.room(l.id);
   room.ready = true;
-  t.after(() => clearTimeout(room.answerCheckTimer));
+  t.after(() => {
+    clearTimeout(room.answerCheckTimer);
+    clearTimeout(room.feedbackTimer);
+  });
   return { store, classroom, room, id: l.id, calls: () => calls };
 }
 function spoken(env) {
@@ -358,7 +361,7 @@ test("prefetch never teaches or scores; a spoken success needs one model call th
   assert.equal(room.preparedNext.cursor, 2);
 });
 
-test("click transitions use the prepared next step without a model call; duplicate clicks do not skip", async (t) => {
+test("choice marks remain until the next delegation; duplicate clicks do not skip", async (t) => {
   const env = await classroomSetup(t);
   const { store, classroom, room, id } = env;
   const l = store.lesson(id);
@@ -379,9 +382,156 @@ test("click transitions use the prepared next step without a model call; duplica
   classroom.click(id, data);
   await room.queue;
   assert.equal(env.calls(), 0);
+  assert.equal(store.lesson(id).state.planCursor, 3);
+  assert.equal(
+    store.publicLesson(id).state.question.correctOptionId,
+    q.correctOptionId,
+  );
+  await classroom.prepared.run({
+    id,
+    trigger: "Nächster Schritt",
+    transcripts: [],
+    latestChild: null,
+    signal: room.controller.signal,
+    confirmedAnswer: null,
+    inputVersion: room.inputVersion,
+  });
   assert.equal(store.lesson(id).state.planCursor, 4);
   assert.equal(store.results(id).attempts.length, 1);
 });
+
+test("an answered choice continues after showing feedback without another child turn", async (t) => {
+  const env = await classroomSetup(t);
+  const { store, classroom, room, id } = env;
+  classroom.feedbackDelayMs = 20;
+  const spokenMessages = [];
+  classroom.send = async (_id, type, content) => {
+    if (type === "session.commentary.append") spokenMessages.push(content);
+  };
+  const lesson = store.lesson(id);
+  lesson.state.planCursor = 2;
+  store.saveState(id, lesson.state);
+  await classroom.prepared.present(id, room.controller.signal);
+  const q = store.lesson(id).state.question;
+  classroom.click(id, {
+    eventId: "auto-choice",
+    questionId: q.id,
+    optionId: q.options.find((option) => option.id !== q.correctOptionId).id,
+    mode: "click",
+    uncertain: false,
+    hinted: false,
+  });
+  await room.queue;
+  assert.equal(store.lesson(id).state.question.id, q.id);
+  assert.equal(store.lesson(id).state.planCursor, 3);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  await room.queue;
+  assert.equal(store.lesson(id).state.planCursor, 4);
+  assert.notEqual(store.lesson(id).state.question.id, q.id);
+  assert.ok(
+    spokenMessages.some((message) =>
+      message.includes("Das richtige englische Wort"),
+    ),
+  );
+  assert.ok(
+    spokenMessages.some((message) => message.includes("Was siehst du")),
+  );
+});
+
+test("a new child utterance cancels automatic advancement and reaches the flexible planner", async (t) => {
+  const env = await classroomSetup(t);
+  const { store, classroom, room, id } = env;
+  classroom.feedbackDelayMs = 20;
+  const lesson = store.lesson(id);
+  lesson.state.planCursor = 2;
+  store.saveState(id, lesson.state);
+  await classroom.prepared.present(id, room.controller.signal);
+  const q = store.lesson(id).state.question;
+  classroom.click(id, {
+    eventId: "before-interruption",
+    questionId: q.id,
+    optionId: q.correctOptionId,
+    mode: "click",
+    uncertain: false,
+    hinted: false,
+  });
+  await room.queue;
+  classroom.onEvent(id, {
+    type: "session.input_transcript.delta",
+    event_id: "child-interruption",
+    delta: "Warte, ich habe eine Frage.",
+    start_ms: 100,
+    end_ms: 400,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(store.lesson(id).state.planCursor, 3);
+  const latestChild = room.transcripts.at(-1);
+  assert.equal(
+    await classroom.prepared.run({
+      id,
+      trigger: "Kind fragt nach",
+      transcripts: room.transcripts,
+      latestChild,
+      signal: room.controller.signal,
+      confirmedAnswer: null,
+      inputVersion: room.inputVersion,
+    }),
+    null,
+  );
+});
+
+for (const wrong of [false, true]) {
+  test(`a ${wrong ? "corrected wrong" : "correct"} spoken recall continues without another child turn`, async (t) => {
+    const env = await classroomSetup(t);
+    const { store, classroom, room, id } = env;
+    classroom.feedbackDelayMs = 20;
+    const lesson = store.lesson(id);
+    lesson.state.planCursor = 3;
+    store.saveState(id, lesson.state);
+    await classroom.prepared.present(id, room.controller.signal);
+    const q = store.lesson(id).state.question;
+    if (wrong)
+      classroom.ai.responses = async () => ({
+        output: [
+          {
+            type: "function_call",
+            name: "assess_prepared_turn",
+            call_id: randomUUID(),
+            arguments: JSON.stringify({
+              action: "answer",
+              questionId: q.id,
+              optionId: null,
+              uncertain: false,
+              hinted: false,
+            }),
+          },
+        ],
+      });
+    room.transcripts.push({
+      role: "child",
+      text: wrong ? "cat" : "dog",
+      questionId: q.id,
+      receivedAt: store.now(),
+      start_ms: 1,
+      end_ms: 2,
+    });
+    classroom.enqueue(id, "Sprachantwort prüfen");
+    await room.queue;
+    assert.equal(store.lesson(id).state.question.status, "answered");
+    assert.equal(
+      store
+        .lesson(id)
+        .state.elements.find((element) => element.id === "practice-answer")
+        ?.text,
+      "dog",
+    );
+    assert.equal(store.lesson(id).state.planCursor, 4);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    await room.queue;
+    assert.equal(store.lesson(id).state.planCursor, 5);
+    assert.notEqual(store.lesson(id).state.question.id, q.id);
+  });
+}
 
 test("uncertain speech stays on the same question and does not count as failed learning", async (t) => {
   const env = await classroomSetup(t, {
@@ -521,7 +671,7 @@ test("plan snapshots and current question survive restart and are not replaced b
   );
 });
 
-test("a wrong prepared click keeps the same question, saves a hint, and accepts one supported retry", async (t) => {
+test("a wrong prepared click reveals the answer and advances only after the next delegation", async (t) => {
   const env = await classroomSetup(t);
   const { store, classroom, room, id } = env;
   const l = store.lesson(id);
@@ -543,11 +693,27 @@ test("a wrong prepared click keeps the same question, saves a hint, and accepts 
   );
   await room.queue;
   assert.equal(store.lesson(id).state.question.id, q.id);
-  assert.equal(store.lesson(id).state.question.hinted, true);
-  classroom.click(id, click("right", q.correctOptionId));
+  assert.equal(store.lesson(id).state.question.status, "answered");
+  assert.equal(
+    store.publicLesson(id).state.question.correctOptionId,
+    q.correctOptionId,
+  );
+  assert.equal(
+    classroom.click(id, click("right", q.correctOptionId)).ignored,
+    true,
+  );
   await room.queue;
-  assert.equal(store.results(id).attempts.length, 2);
-  assert.equal(store.results(id).attempts[1].hinted, 1);
+  assert.equal(store.results(id).attempts.length, 1);
+  assert.equal(store.lesson(id).state.planCursor, 3);
+  await classroom.prepared.run({
+    id,
+    trigger: "Nächster Schritt",
+    transcripts: [],
+    latestChild: null,
+    signal: room.controller.signal,
+    confirmedAnswer: null,
+    inputVersion: room.inputVersion,
+  });
   assert.equal(store.lesson(id).state.planCursor, 4);
   assert.equal(env.calls(), 0);
 });

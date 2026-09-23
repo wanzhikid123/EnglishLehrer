@@ -1192,6 +1192,14 @@ function Classroom({ initial, initialStream, onConsumed, onFinish }) {
                     {q.options.map((o, i) => (
                       <button
                         key={o.id}
+                        className={
+                          q.status === "answered" && o.id === q.correctOptionId
+                            ? "is-correct"
+                            : q.status === "answered" &&
+                                o.id === q.selectedOptionId
+                              ? "is-incorrect"
+                              : ""
+                        }
                         onClick={() => answer(o.id)}
                         disabled={
                           !connected || answerBusy || q.status !== "open"
@@ -1207,6 +1215,25 @@ function Classroom({ initial, initialStream, onConsumed, onFinish }) {
                           <span className="option-emoji">{o.emoji}</span>
                         ) : null}
                         <strong>{o.label}</strong>
+                        {q.status === "answered" &&
+                        o.id === q.correctOptionId ? (
+                          <span
+                            className="option-mark correct"
+                            role="img"
+                            aria-label="Richtig"
+                          >
+                            <Check size={21} strokeWidth={3} />
+                          </span>
+                        ) : q.status === "answered" &&
+                          o.id === q.selectedOptionId ? (
+                          <span
+                            className="option-mark incorrect"
+                            role="img"
+                            aria-label="Falsch"
+                          >
+                            <X size={21} strokeWidth={3} />
+                          </span>
+                        ) : null}
                       </button>
                     ))}
                   </div>

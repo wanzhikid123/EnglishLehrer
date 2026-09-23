@@ -112,6 +112,11 @@ export class PreparedLesson {
     )
       return this.present(id, signal);
     if (!q || q.id !== l.state.preparedQuestionId) return null;
+    if (!confirmedAnswer && q.status === "answered") {
+      if (latestChild && inputVersion !== room.feedbackInputVersion)
+        return null;
+      return this.present(id, signal);
+    }
     let answer = confirmedAnswer;
     if (!answer) {
       if (!latestChild || latestChild.questionId !== q.id) return null;
@@ -173,6 +178,16 @@ export class PreparedLesson {
     if (signal.aborted || inputVersion !== room.inputVersion) return "";
     if (answer.outcome === "uncertain")
       return "Das habe ich noch nicht sicher verstanden. Bitte sag es noch einmal. Keine Wertung, keine neue Aufgabe.";
+    if (["choice", "german_choice"].includes(q.mode)) {
+      const correct =
+        q.options.find((option) => option.id === q.correctOptionId)?.label ||
+        q.knowledge;
+      return `Die Auswahl ist abgeschlossen. ${answer.outcome === "correct" ? "Lobe kurz." : "Korrigiere freundlich."} Sage: Das richtige englische Wort ist ${correct}. Lass die Häkchen und Kreuze kurz sichtbar. Danach geht der Unterricht automatisch weiter.`;
+    }
+    if (["picture_speak", "german_speak"].includes(q.mode))
+      return answer.outcome === "correct"
+        ? `Bestätige kurz: ${q.knowledge} ist richtig. Das englische Wort steht jetzt auf der Tafel. Lass es kurz sichtbar. Danach geht der Unterricht automatisch weiter.`
+        : `Korrigiere freundlich: Das englische Wort ist ${q.knowledge}. Es steht jetzt auf der Tafel. Lass es kurz sichtbar. Danach geht der Unterricht automatisch weiter.`;
     if (answer.outcome === "incorrect") return this.hint(id, q.id);
     const next = await this.present(id, signal);
     if (next) return `Kurz und freundlich bestätigen. ${next}`;

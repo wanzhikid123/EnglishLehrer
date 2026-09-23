@@ -101,15 +101,35 @@ export const speechTempoSchema = z.object({
 
 export const topicSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-  name: z.string().trim().min(1).max(100),
-  english: z.string().trim().min(1).max(100),
+  name: z.string().trim().min(1).max(100).describe("Themenname auf Deutsch"),
+  english: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .describe("Thementitel auf Englisch"),
   icon: z.string().min(1).max(12),
   color: z.enum(["peach", "lavender", "mint", "sand"]),
-  goal: z.string().trim().min(1).max(500),
-  words: z.array(z.string().trim().min(1).max(80)).min(1).max(80),
-  phrases: z.array(z.string().trim().min(1).max(150)).max(40),
-  level: z.string().trim().min(1).max(100),
-  teachingNotes: z.string().max(2000),
+  goal: z.string().trim().min(1).max(500).describe("Lernziel auf Deutsch"),
+  words: z
+    .array(z.string().trim().min(1).max(80))
+    .min(1)
+    .max(80)
+    .describe("Lernwörter auf Englisch"),
+  phrases: z
+    .array(z.string().trim().min(1).max(150))
+    .max(40)
+    .describe("Beispielsätze auf Englisch"),
+  level: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .describe("Niveau der Themenkarte auf Deutsch"),
+  teachingNotes: z
+    .string()
+    .max(2000)
+    .describe("Unterrichtshinweise auf Deutsch"),
   coverage: z.enum(["small_steps", "all"]),
 });
 export const topicToolSchema = z.object({

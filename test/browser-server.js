@@ -41,6 +41,11 @@ const classroom = {
   publish(id) {
     this.emit("lesson", store.publicLesson(id));
   },
+  click(id, data) {
+    const result = store.answer(id, data);
+    this.publish(id);
+    return result;
+  },
   subscribe(id, res) {
     clients.add(res);
     res.write(
@@ -125,6 +130,7 @@ store.updateBoard(l.id, "fixture-board", {
   taught: [{ text: "red", kind: "word" }],
 });
 store.finish(l.id, "interrupted");
+const initialFixtureState = structuredClone(store.lesson(l.id).state);
 const preparation = new Preparation(store, {
   responses: async (input) => {
     if (input.at(-1).type === "function_call_output")
@@ -357,5 +363,28 @@ app.post("/fixture/practice", (req, res) => {
   );
   classroom.publish(l.id);
   res.json(store.publicLesson(l.id));
+});
+app.post("/fixture/voice-answer", (req, res) => {
+  const q = store.lesson(l.id).state.question;
+  const option = q.options.find((item) => item.label === req.body.word);
+  const result = store.answer(l.id, {
+    eventId: crypto.randomUUID(),
+    questionId: q.id,
+    optionId: option?.id || null,
+    mode: "voice",
+    uncertain: false,
+    hinted: false,
+  });
+  classroom.publish(l.id);
+  res.json(result);
+});
+app.post("/fixture/reset-classroom", (_req, res) => {
+  store.finish(l.id, "interrupted");
+  store.saveState(l.id, structuredClone(initialFixtureState));
+  store.db
+    .prepare("UPDATE questions SET status='open',hinted=0 WHERE lesson_id=? AND id='pick-red'")
+    .run(l.id);
+  classroom.publish(l.id);
+  res.json({ ok: true });
 });
 app.listen(config.port, "127.0.0.1");

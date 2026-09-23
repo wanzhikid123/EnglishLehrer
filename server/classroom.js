@@ -29,6 +29,7 @@ export class Classroom {
     this.rooms = new Map();
     this.clients = new Map();
     this.prepared = new PreparedLesson(this);
+    this.feedbackDelayMs = 3500;
   }
   room(id) {
     if (!this.rooms.has(id))
@@ -47,6 +48,9 @@ export class Classroom {
         wrapSent: false,
         busy: 0,
         inputVersion: 0,
+        feedbackTimer: null,
+        feedbackQuestionId: null,
+        feedbackInputVersion: null,
       });
     return this.rooms.get(id);
   }
@@ -97,6 +101,10 @@ export class Classroom {
       room.inputVersion++;
       room.preparedNext = null;
       clearTimeout(room.answerCheckTimer);
+      clearTimeout(room.feedbackTimer);
+      room.feedbackTimer = null;
+      room.feedbackQuestionId = null;
+      room.feedbackInputVersion = null;
       room.rendered = -1;
       if (room.remoteId) await this.ai.closeLive(room.remoteId, room.socket);
       const result = await this.ai.live(
@@ -268,6 +276,8 @@ export class Classroom {
       const q = this.store.lesson(id).state.question;
       if (isChild) {
         this.cancelGoodbye(id);
+        clearTimeout(room.feedbackTimer);
+        room.feedbackTimer = null;
         room.inputVersion++;
         if (!room.inputSpan || event.start_ms - room.inputSpan.end > 1500) {
           room.inputSpan = {
@@ -459,6 +469,7 @@ export class Classroom {
     const result = this.store.deleteLesson(id);
     if (room) {
       this.cancelGoodbye(id);
+      clearTimeout(room.feedbackTimer);
       this.rooms.delete(id);
     }
     this.emit(id, "deleted", { id });
@@ -547,6 +558,7 @@ export class Classroom {
               this.publish(id);
             }
           }
+          this.scheduleFeedbackContinuation(id, inputVersion);
         } catch (e) {
           if (!signal.aborted) {
             this.emit(id, "notice", {
@@ -569,6 +581,48 @@ export class Classroom {
       .finally(() => {
         room.busy--;
       });
+  }
+  scheduleFeedbackContinuation(id, inputVersion) {
+    const room = this.room(id);
+    const lesson = this.store.lesson(id);
+    const q = lesson.state.question;
+    if (
+      !room.ready ||
+      room.closing ||
+      lesson.status !== "active" ||
+      lesson.state.readyToFinish ||
+      q?.status !== "answered" ||
+      !["choice", "german_choice", "picture_speak", "german_speak"].includes(
+        q.mode,
+      ) ||
+      room.feedbackQuestionId === q.id
+    )
+      return;
+    clearTimeout(room.feedbackTimer);
+    room.feedbackQuestionId = q.id;
+    room.feedbackInputVersion = inputVersion;
+    room.feedbackTimer = setTimeout(() => {
+      room.feedbackTimer = null;
+      if (
+        room.closing ||
+        !room.ready ||
+        room.controller.signal.aborted ||
+        room.inputVersion !== inputVersion
+      )
+        return;
+      const current = this.store.lesson(id);
+      if (
+        current.status !== "active" ||
+        current.state.readyToFinish ||
+        current.state.question?.id !== q.id ||
+        current.state.question.status !== "answered"
+      )
+        return;
+      this.enqueue(
+        id,
+        "Die Antwort wurde erklärt und war kurz sichtbar. Fahre jetzt ohne neue Kindereingabe mit genau einem passenden nächsten Unterrichtsschritt fort.",
+      );
+    }, this.feedbackDelayMs);
   }
   async execute(id, name, args, eventId, latestChild, signal) {
     if (signal.aborted) throw new AppError("Stunde unterbrochen.", 409);
@@ -688,7 +742,7 @@ export class Classroom {
     if (result.ok && !result.duplicate)
       this.enqueue(
         id,
-        `Klickantwort bereits gespeichert: ${JSON.stringify(result)}. NICHT erneut bewerten oder speichern. Bestätige das Ergebnis. Bei Fehler Tipp und erneuten Versuch, bei Erfolg nächsten passenden Schritt vorbereiten.`,
+        `Klickantwort bereits gespeichert: ${JSON.stringify(result)}. NICHT erneut bewerten oder speichern. Bestätige das Ergebnis. Eine beantwortete Auswahlfrage zeigt jetzt die richtige Option und bei Fehler auch die falsche Wahl; sage die englische Lösung und lass die Markierungen kurz sichtbar. Die App fordert danach selbst den nächsten Schritt an.`,
         null,
         result,
       );
@@ -723,6 +777,8 @@ export class Classroom {
     room.ready = false;
     this.cancelGoodbye(id);
     clearTimeout(room.answerCheckTimer);
+    clearTimeout(room.feedbackTimer);
+    room.feedbackTimer = null;
     room.controller.abort();
     for (const p of room.pending.values())
       p.reject(new AppError("Stunde beendet.", 409));
