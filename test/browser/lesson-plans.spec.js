@@ -1,4 +1,29 @@
 import { test, expect } from "@playwright/test";
+import { fakeMedia } from "./fake-media.js";
+
+test("selected topic starts directly from Unterrichtsplan & Lernbelege", async ({
+  page,
+}) => {
+  await page.addInitScript(fakeMedia);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Vorbereitung", exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "Thema", exact: true })
+    .selectOption("animals");
+  await page
+    .getByRole("button", { name: "Unterrichtsplan & Lernbelege", exact: true })
+    .click();
+  const start = page
+    .getByRole("region", { name: "Ausführbarer Unterrichtsplan" })
+    .getByRole("button", { name: "Mikrofon an & Stunde starten" });
+  await expect(start).toBeEnabled();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await start.click();
+  await expect(page.locator(".classroom-title")).toContainText("Tierisch gut");
+  await expect(page.locator(".connection")).toHaveText("Verbunden");
+  await page.getByRole("button", { name: "Beenden", exact: true }).click();
+  await expect(page.locator(".summary-page")).toBeVisible();
+});
 
 test("parents generate, preview, reorder and persist an executable plan without creating learning results", async ({
   page,

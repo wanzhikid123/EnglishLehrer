@@ -311,6 +311,10 @@ function App() {
           home={home}
           onUpdated={refresh}
           initialTopicId={preparationTopicId}
+          onStart={start}
+          startBusy={busy}
+          startError={error}
+          keyConfigured={health?.keyConfigured}
         />
       ) : (
         <main className="home-page">

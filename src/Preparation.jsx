@@ -14,7 +14,15 @@ import { confirmTopicDeletion } from "./topic-actions.js";
 import { useDictation } from "./useDictation.js";
 import { LessonPlanEditor } from "./LessonPlan.jsx";
 
-export function PreparationPage({ home, onUpdated, initialTopicId = "" }) {
+export function PreparationPage({
+  home,
+  onUpdated,
+  initialTopicId = "",
+  onStart,
+  startBusy,
+  startError,
+  keyConfigured,
+}) {
   const [state, setState] = useState({
     turns: [],
     topics: home.topics,
@@ -24,6 +32,7 @@ export function PreparationPage({ home, onUpdated, initialTopicId = "" }) {
   const [topicId, setTopicId] = useState(initialTopicId);
   const [planBusy, setPlanBusy] = useState(false);
   const [planView, setPlanView] = useState(Boolean(initialTopicId));
+  const [startAttempted, setStartAttempted] = useState(false);
   const [lessonId, setLessonId] = useState("");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
@@ -208,7 +217,10 @@ export function PreparationPage({ home, onUpdated, initialTopicId = "" }) {
           <select
             value={topicId}
             disabled={busy}
-            onChange={(e) => setTopicId(e.target.value)}
+            onChange={(e) => {
+              setTopicId(e.target.value);
+              setStartAttempted(false);
+            }}
           >
             <option value="">Alle Themen / neues Thema</option>
             {state.topics.map((item) => (
@@ -601,9 +613,16 @@ export function PreparationPage({ home, onUpdated, initialTopicId = "" }) {
         <LessonPlanEditor
           key={`${topic.id}-${topic.revision}`}
           topic={topic}
-          disabled={sending || acting || voiceBusy}
+          disabled={sending || acting || voiceBusy || startBusy}
           onBusy={setPlanBusy}
           onUpdated={onUpdated}
+          onStart={() => {
+            setStartAttempted(true);
+            onStart(topic);
+          }}
+          starting={startBusy}
+          startError={startAttempted ? startError : ""}
+          keyConfigured={keyConfigured}
         />
       )}
     </main>

@@ -2307,6 +2307,16 @@ button svg {
 .lesson-plan-editor h2 {
   font-size: 24px;
 }
+.plan-header-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.plan-start-note {
+  display: block;
+  color: #65755d;
+}
 .lesson-plan-editor p,
 .lesson-plan-editor small {
   line-height: 1.6;
@@ -2470,6 +2480,10 @@ button svg {
     align-items: flex-start;
     gap: 12px;
     flex-direction: column;
+  }
+  .plan-header-actions {
+    width: 100%;
+    justify-content: flex-start;
   }
   .plan-workspace {
     grid-template-columns: minmax(0, 1fr);

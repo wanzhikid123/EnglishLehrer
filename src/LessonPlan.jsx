@@ -6,6 +6,7 @@ import {
   Save,
   RefreshCw,
   Eye,
+  Mic,
 } from "lucide-react";
 import { api, dateText } from "./api.js";
 import { BoardElement } from "./BoardElement.jsx";
@@ -65,6 +66,10 @@ export function LessonPlanEditor({
   disabled = false,
   onBusy = () => {},
   onUpdated = () => {},
+  onStart,
+  starting = false,
+  startError = "",
+  keyConfigured = false,
 }) {
   const [state, setState] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -176,15 +181,50 @@ export function LessonPlanEditor({
           <span className="eyebrow">FÜR DIE NÄCHSTE STUNDE</span>
           <h2>Unterricht vorbereiten · {topic.name}</h2>
         </div>
-        <button
-          className="button secondary"
-          disabled={locked || !state}
-          onClick={() => build(false)}
-        >
-          <RefreshCw size={17} />
-          {state?.plan ? "Plan neu erstellen" : "Plan erstellen"}
-        </button>
+        <div className="plan-header-actions">
+          <button
+            className="button secondary"
+            disabled={locked || !state}
+            onClick={() => build(false)}
+          >
+            <RefreshCw size={17} />
+            {state?.plan ? "Plan neu erstellen" : "Plan erstellen"}
+          </button>
+          <button
+            className="button"
+            disabled={locked || !state || dirty || !keyConfigured}
+            onClick={onStart}
+          >
+            {starting ? (
+              <LoaderCircle className="spin" size={18} />
+            ) : (
+              <Mic size={18} />
+            )}
+            {starting
+              ? "Mikrofon wird vorbereitet …"
+              : "Mikrofon an & Stunde starten"}
+          </button>
+        </div>
       </div>
+      {dirty && (
+        <p className="hint">
+          Bitte den Plan speichern, bevor du die Stunde startest.
+        </p>
+      )}
+      {!keyConfigured && (
+        <p className="error-text">
+          Bitte zuerst die Windows-Umgebungsvariable OPENAI_API_KEY einrichten.
+        </p>
+      )}
+      {startError && (
+        <p role="alert" className="error-text">
+          {startError}
+        </p>
+      )}
+      <small className="plan-start-note">
+        Mia ist eine KI-Lehrerin. Deine Stimme wird für das Gespräch an OpenAI
+        übertragen. Auf diesem Computer werden keine Aufnahmen gespeichert.
+      </small>
       <p>
         Übungen mit Emoji oder deutschen Begriffen vorbereiten. Mia wartet bei
         jeder Aufgabe auf die Antwort und passt sich Wünschen an. Änderungen
